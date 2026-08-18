@@ -18,8 +18,8 @@ const char* WIFI_SSID = "Edson_2.4GHz";
 const char* WIFI_PASSWORD = "ramos6738";
 
 // --- API (coloque o IP do seu PC) ---
-const char* API_URL_CHECKPOINT = "http://192.168.0.115:8080/api/checkpoint";
-const char* API_URL_SENSOR = "http://192.168.0.115:8080/api/sensor";
+const char* API_URL_CHECKPOINT = "http://192.168.0.139:8080/api/checkpoint";
+const char* API_URL_SENSOR = "http://192.168.0.139:8080/api/sensor";
 // --- Horário (NTP) ---
 const char* NTP_SERVER = "a.st1.ntp.br";
 const long  GMT_OFFSET_SEC = -10800;            // Brasília UTC-3

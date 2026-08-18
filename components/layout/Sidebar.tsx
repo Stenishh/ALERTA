@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import { useUnit } from "@/lib/unit-context";
 import {
   LayoutGrid,
-  FolderOpen,
   Settings,
   PlusCircle,
   LucideIcon,

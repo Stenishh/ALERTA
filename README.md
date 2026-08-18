@@ -51,9 +51,9 @@ Uma interface moderna desenvolvida que permite à equipe de enfermagem visualiza
 | Camada | Tecnologia |
 |--------|-----------|
 | **Hardware** | ESP32, Acelerômetro Triaxial, C++ |
-| **Frontend** | Next.js 14 (App Router), TypeScript, Tailwind CSS |
-| **Gerenciamento** | Zustand, React Hooks |
-| **Backend/Banco** | Supabase, API Routes |
+| **Frontend** | Next.js (App Router), TypeScript, Tailwind CSS |
+| **Gerenciamento** | React Hooks |
+| **Backend/Banco** | Flask, persistência local em JSON |
 | **Design** | Figma (Prototipagem UX/UI) |
 
 ---
@@ -61,7 +61,10 @@ Uma interface moderna desenvolvida que permite à equipe de enfermagem visualiza
 ## 📁 Estrutura do Projeto
 
 ```
-sera prenchido ou removido depois 
+app/ e components/  Dashboard Next.js
+backend/             API Flask e testes
+hooks/ e lib/        Integração do frontend com a API
+codigoESP.INO        Firmware do ESP32 + MPU6050
 ```
 
 ---
@@ -69,7 +72,65 @@ sera prenchido ou removido depois
 
 ## 🚧 Instalação e Execução
 
-Esta seção será atualizada conforme o avanço do desenvolvimento com as instruções de instalação e scripts necessários.
+### Backend
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+A API fica disponível na porta `8080`. Os dispositivos vinculados e a última
+telemetria são persistidos em `backend/data/devices.json`, criado automaticamente.
+
+### Frontend
+
+```bash
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Por padrão, o navegador acessa o backend em `http://localhost:8080`. Se o painel
+for aberto em outro computador, altere `NEXT_PUBLIC_API_URL` em `.env.local` para
+o IP da máquina que executa o Flask.
+
+### ESP32
+
+No arquivo `codigoESP.INO`:
+
+1. configure `WIFI_SSID` e `WIFI_PASSWORD`;
+2. ajuste `API_URL_SENSOR` e `API_URL_CHECKPOINT` para o IP da máquina do Flask;
+3. confirme o pino `BATTERY_ADC_PIN` e o valor de `BATTERY_DIVIDER_RATIO` de
+   acordo com o divisor resistivo usado no hardware;
+4. grave o firmware e vincule no dashboard o mesmo MAC exibido como `Device ID`
+   no monitor serial.
+
+O exemplo está configurado para uma bateria Li-ion/LiPo de 3,2–4,2 V ligada ao
+GPIO 4 por um divisor 100k/100k. Nunca conecte a bateria diretamente a um ADC do
+ESP32.
+
+### Contrato principal da API
+
+| Método | Endpoint | Consumidor |
+|---|---|---|
+| `POST` | `/api/sensor` | ESP32 envia movimento, bateria e RSSI |
+| `POST` | `/api/checkpoint` | ESP32 envia sinal de atividade opcional |
+| `GET` | `/api/patients` | Dashboard lista telemetria real |
+| `POST` | `/api/devices` | Dashboard vincula MAC e paciente |
+| `GET` | `/api/alerts?status=pending` | Dashboard consulta quedas abertas |
+| `PATCH` | `/api/alerts/:id` | Dashboard atende ou descarta uma queda |
+| `POST` | `/api/devices/:id/reset` | Agenda reset remoto do ESP32 |
+
+### Validação
+
+```bash
+npm run lint
+npm run build
+cd backend && python -m unittest -v test_app.py
+```
 
 ---
 

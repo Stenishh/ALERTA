@@ -1,5 +1,5 @@
 // ============================================================
-// DOMÍNIO: PACIENTE (mock para demonstração)
+// DOMÍNIO: PACIENTE (vindo da API Flask)
 // ============================================================
 
 export type PatientStatus =
@@ -18,10 +18,19 @@ export interface Patient {
   status: PatientStatus;
   riskLevel: RiskLevel;
   deviceId: string;
-  battery: number;
+  battery: number | null;
+  batteryVoltage?: number | null;
+  wifiSignal?: number | null;
   bedId?: string;
   avatarUrl?: string;
   fallHistory?: FallRecord[];
+  lastUpdate?: string | null;
+  rawStatus?: string;
+  checkpoint?: number | null;
+  activityDurationSeconds?: number;
+  fallsThisMonth?: number;
+  medicalRecord?: MedicalRecord | null;
+  registered?: boolean;
 }
 
 // ============================================================
@@ -61,9 +70,15 @@ export interface SensorLog {
  * Formato que o Flask recebe do ESP32 em POST /api/sensor
  */
 export interface SensorPayload {
-  status: string;         // "QUEDA_CONFIRMADA", "NORMAL", etc.
+  deviceId: string;
+  chipId?: string;
+  timestamp?: string;
+  status: string;         // "QUEDA CONFIRMADA", "EM MOVIMENTO", etc.
   accMagnitude: number;   // magnitude da aceleração em m/s²
   checkpoint: number;     // ID sequencial do pacote
+  battery: number;
+  batteryVoltage: number;
+  wifiRssi: number;
 }
 
 // ============================================================
@@ -77,21 +92,7 @@ export interface DashboardMetrics {
 }
 
 // ============================================================
-// DOMÍNIO: NOTIFICAÇÕES DA BARRA INFERIOR
-// ============================================================
-
-export type NotificationType = "maintenance" | "firmware" | "battery";
-
-export interface DeviceNotification {
-  id: string;
-  type: NotificationType;
-  message: string;
-  deviceId: string;
-  scheduledFor?: string;
-}
-
-// ============================================================
-// DOMÍNIO: FICHA MÉDICA (sem persistência — só frontend)
+// DOMÍNIO: FICHA MÉDICA
 // ============================================================
 
 export interface MedicalRecord {

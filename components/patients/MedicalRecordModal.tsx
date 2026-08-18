@@ -7,7 +7,7 @@ import type { MedicalRecord, RiskLevel, Patient } from "@/types";
 interface MedicalRecordModalProps {
   patient: Patient;
   existingRecord: MedicalRecord | null;
-  onSave: (record: MedicalRecord) => void;
+  onSave: (record: MedicalRecord) => Promise<void>;
   onClose: () => void;
 }
 
@@ -28,10 +28,24 @@ export function MedicalRecordModal({
   );
   const [responsible, setResponsible] = useState(existingRecord?.responsible ?? "");
   const [observations, setObservations] = useState(existingRecord?.observations ?? "");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleSave() {
-    onSave({ riskLevel, responsible, observations });
-    onClose();
+  async function handleSave() {
+    setIsSaving(true);
+    setError(null);
+    try {
+      await onSave({ riskLevel, responsible, observations });
+      onClose();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível salvar as informações."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const initials = patient.name
@@ -54,6 +68,7 @@ export function MedicalRecordModal({
             style={{ borderBottomColor: "var(--border)" }}
             className="flex items-center justify-between px-6 py-4 border-b"
           >
+            {error && <p className="mr-auto text-xs text-red-500">{error}</p>}
             <h2 style={{ color: "var(--text-primary)" }} className="font-bold text-base">
               Registrar Informações Médicas
             </h2>
@@ -163,12 +178,13 @@ export function MedicalRecordModal({
               Cancelar
             </button>
             <button
-              onClick={handleSave}
+              onClick={() => void handleSave()}
+              disabled={isSaving}
               style={{ backgroundColor: "var(--accent)", color: "#020617" }}
               className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-bold transition-colors"
             >
               <Save size={14} />
-              Salvar Informações
+              {isSaving ? "Salvando..." : "Salvar Informações"}
             </button>
           </div>
 

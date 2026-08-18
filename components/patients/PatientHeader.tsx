@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Unlink, Pencil, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Unlink, Pencil, AlertTriangle, RotateCcw } from "lucide-react";
 import type { Patient } from "@/types";
 
 interface PatientHeaderProps {
   patient: Patient;
   onEditMedicalRecord: () => void;
+  onUnlink: () => Promise<void>;
+  onReset: () => Promise<void>;
 }
 
 const statusConfig = {
@@ -17,9 +19,48 @@ const statusConfig = {
   offline: { label: "Offline", dot: "bg-slate-400" },
 };
 
-export function PatientHeader({ patient, onEditMedicalRecord }: PatientHeaderProps) {
+export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset }: PatientHeaderProps) {
   const status = statusConfig[patient.status];
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isUnlinking, setIsUnlinking] = useState(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
+
+  async function handleUnlink() {
+    setIsUnlinking(true);
+    setUnlinkError(null);
+    try {
+      await onUnlink();
+      setShowConfirm(false);
+    } catch (requestError) {
+      setUnlinkError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível desvincular o colete."
+      );
+    } finally {
+      setIsUnlinking(false);
+    }
+  }
+
+  async function handleReset() {
+    if (!window.confirm(`Reiniciar o colete ${patient.deviceId}?`)) return;
+    setIsResetting(true);
+    setResetMessage(null);
+    try {
+      await onReset();
+      setResetMessage("Reset agendado. O comando será entregue na próxima leitura.");
+    } catch (requestError) {
+      setResetMessage(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível agendar o reset."
+      );
+    } finally {
+      setIsResetting(false);
+    }
+  }
 
   return (
     <>
@@ -47,6 +88,7 @@ export function PatientHeader({ patient, onEditMedicalRecord }: PatientHeaderPro
                   <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.deviceId}</span> do paciente{" "}
                   <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.name}</span>?
                 </p>
+                {unlinkError && <p className="text-xs text-red-500 mt-3">{unlinkError}</p>}
               </div>
               <div
                 className="flex items-center gap-2 px-6 py-4 border-t"
@@ -65,10 +107,11 @@ export function PatientHeader({ patient, onEditMedicalRecord }: PatientHeaderPro
                   Cancelar
                 </button>
                 <button
-                  onClick={() => setShowConfirm(false)}
+                  onClick={() => void handleUnlink()}
+                  disabled={isUnlinking}
                   className="flex-1 py-2.5 rounded-xl text-sm text-white bg-red-600 hover:bg-red-700 font-bold transition-colors"
                 >
-                  Sim, desvincular
+                  {isUnlinking ? "Desvinculando..." : "Sim, desvincular"}
                 </button>
               </div>
             </div>
@@ -122,6 +165,20 @@ export function PatientHeader({ patient, onEditMedicalRecord }: PatientHeaderPro
           </div>
 
           <div className="flex items-center gap-2">
+            {resetMessage && (
+              <span className="max-w-48 text-right text-[10px]" style={{ color: "var(--text-muted)" }}>
+                {resetMessage}
+              </span>
+            )}
+            <button
+              onClick={() => void handleReset()}
+              disabled={isResetting || patient.status === "offline"}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl border bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ borderColor: "var(--border)" }}
+            >
+              <RotateCcw size={14} className={isResetting ? "animate-spin" : ""} />
+              {isResetting ? "Agendando..." : "Reiniciar Colete"}
+            </button>
             <button
               onClick={onEditMedicalRecord}
               className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium transition-all"

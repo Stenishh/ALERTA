@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { FallAlert } from "@/types";
 import { AlertTriangle } from "lucide-react";
 
 interface FallAlertModalProps {
   alert: FallAlert;
-  onRespond: () => void;
-  onDismiss: () => void;
+  onRespond: () => Promise<void>;
+  onDismiss: () => Promise<void>;
 }
 
 export function FallAlertModal({ alert, onRespond, onDismiss }: FallAlertModalProps) {
+  const [isResolving, setIsResolving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const audio = new Audio("/alert.mp3");
     audio.volume = 0.7;
@@ -22,6 +25,21 @@ export function FallAlertModal({ alert, onRespond, onDismiss }: FallAlertModalPr
     minute: "2-digit",
     second: "2-digit",
   });
+
+  async function handleAction(action: () => Promise<void>) {
+    setIsResolving(true);
+    setError(null);
+    try {
+      await action();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível atualizar o alerta."
+      );
+      setIsResolving(false);
+    }
+  }
 
   return (
     <>
@@ -58,18 +76,22 @@ export function FallAlertModal({ alert, onRespond, onDismiss }: FallAlertModalPr
             {/* Botões */}
             <div className="flex gap-3">
               <button
-                onClick={onRespond}
+                onClick={() => void handleAction(onRespond)}
+                disabled={isResolving}
                 className="flex-1 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-white font-bold text-sm py-3 rounded-xl"
               >
                 RESPONDER AGORA
               </button>
               <button
-                onClick={onDismiss}
+                onClick={() => void handleAction(onDismiss)}
+                disabled={isResolving}
                 className="flex-1 active:scale-95 transition-all text-slate-700 font-medium text-sm py-3 rounded-xl border-2 border-slate-200 bg-white hover:bg-slate-50"
               >
                 FALSO ALERTA
               </button>
             </div>
+
+            {error && <p className="text-center text-red-500 text-xs">{error}</p>}
 
             <p className="text-center text-slate-400 text-xs">
               Este alerta não pode ser ignorado sem uma ação

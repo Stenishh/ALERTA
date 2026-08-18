@@ -7,16 +7,10 @@ import { PatientCard } from "@/components/dashboard/PatientCard";
 import { MetricCard } from "@/components/dashboard/MetricCard";
 import { FallAlertModal } from "@/components/dashboard/FallAlertModal";
 import { Search, LayoutGrid, List } from "lucide-react";
-import { MOCK_NOTIFICATIONS } from "@/lib/mock-data";
-
-const notificationIcons: Record<string, string> = {
-  battery: "🔋",
-  firmware: "↻",
-  maintenance: "🔔",
-};
+import Link from "next/link";
 
 export default function DashboardPage() {
-  const { patients, metrics, isLoading } = usePatients();
+  const { patients, metrics, isLoading, error } = usePatients();
   const { activeAlert, respondToAlert, dismissAlert } = useFallDetection();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
@@ -26,6 +20,10 @@ export default function DashboardPage() {
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.deviceId.toLowerCase().includes(search.toLowerCase())
   );
+  const lowBatteryDevices = patients.filter(
+    (patient) => patient.battery !== null && patient.battery < 20
+  );
+  const offlineDevices = patients.filter((patient) => patient.status === "offline");
 
   return (
     <div className="flex flex-col h-full gap-6">
@@ -98,28 +96,11 @@ export default function DashboardPage() {
         </div>
       </div>
 
-    {process.env.NODE_ENV === "development" && (
-  <button
-    onClick={() => {
-      // Tenta enviar para o Flask, mas dispara o modal direto também
-      fetch("http://localhost:8080/api/sensor", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "QUEDA_CONFIRMADA",
-          accMagnitude: 24.3,
-          checkpoint: 99,
-        }),
-      }).catch(() => {});
-
-      // Dispara o modal diretamente para teste sem Flask
-      window.dispatchEvent(new CustomEvent("test-fall-alert"));
-    }}
-    className="self-start bg-red-100 hover:bg-red-200 text-red-600 text-xs font-medium px-3 py-1.5 rounded-lg border border-red-200"
-  >
-    🧪 Simular Queda (dev only)
-  </button>
-)}
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          Backend indisponível: {error}
+        </div>
+      )}
 
     {/* MÉTRICAS */}
 <div className="flex items-center gap-4">
@@ -147,10 +128,20 @@ export default function DashboardPage() {
           ))}
         </div>
       ) : filteredPatients.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
+        <div className="flex-1 flex flex-col gap-3 items-center justify-center">
           <p className="text-slate-400 text-sm">
-            Nenhum paciente encontrado para &quot;{search}&quot;
+            {search
+              ? `Nenhum paciente encontrado para "${search}"`
+              : "Nenhum dispositivo enviou dados ou foi vinculado ainda."}
           </p>
+          {!search && (
+            <Link
+              href="/devices/new"
+              className="bg-sky-500 hover:bg-sky-600 text-white text-xs font-medium px-4 py-2 rounded-lg"
+            >
+              Vincular dispositivo
+            </Link>
+          )}
         </div>
       ) : (
         <div
@@ -166,22 +157,38 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* BARRA DE NOTIFICAÇÕES */}
+      {/* SAÚDE REAL DOS DISPOSITIVOS */}
       <div className="mt-auto bg-slate-900 rounded-xl px-5 py-3 flex items-center gap-6">
-  <span className="text-white text-xs font-medium uppercase tracking-widest flex-shrink-0">
-    🔔 Próximas Manutenções
-  </span>
-  <div className="flex items-center gap-6 flex-1 overflow-hidden">
-    {MOCK_NOTIFICATIONS.map((notif) => (
-      <span key={notif.id} className="text-white text-xs flex items-center gap-1 whitespace-nowrap">
-        {notificationIcons[notif.type]} {notif.message}
-      </span>
-    ))}
-  </div>
-  <button className="bg-sky-500 hover:bg-sky-600 transition-colors text-white text-xs font-medium px-4 py-2 rounded-lg flex-shrink-0">
-    Ver Todos os Dispositivos
-  </button>
-</div>
+        <span className="text-white text-xs font-medium uppercase tracking-widest flex-shrink-0">
+          🔔 Saúde dos Dispositivos
+        </span>
+        <div className="flex items-center gap-6 flex-1 overflow-hidden">
+          {lowBatteryDevices.length === 0 && offlineDevices.length === 0 ? (
+            <span className="text-emerald-300 text-xs whitespace-nowrap">
+              Nenhum alerta ativo
+            </span>
+          ) : (
+            <>
+              {lowBatteryDevices.map((patient) => (
+                <span key={`battery-${patient.id}`} className="text-amber-300 text-xs whitespace-nowrap">
+                  🔋 {patient.deviceId}: bateria em {patient.battery}%
+                </span>
+              ))}
+              {offlineDevices.map((patient) => (
+                <span key={`offline-${patient.id}`} className="text-slate-300 text-xs whitespace-nowrap">
+                  📵 {patient.deviceId}: offline
+                </span>
+              ))}
+            </>
+          )}
+        </div>
+        <Link
+          href="/devices/new"
+          className="bg-sky-500 hover:bg-sky-600 transition-colors text-white text-xs font-medium px-4 py-2 rounded-lg flex-shrink-0"
+        >
+          Vincular Dispositivo
+        </Link>
+      </div>
     </div>
   );
 }

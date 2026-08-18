@@ -1,75 +1,70 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import type { SensorLog, FallAlert } from "@/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import type { AlertStatus, FallAlert } from "@/types";
+
+interface ApiFallAlert extends Omit<FallAlert, "detectedAt"> {
+  detectedAt: string;
+}
 
 interface UseFallDetectionReturn {
   activeAlert: FallAlert | null;
-  dismissAlert: () => void;
-  respondToAlert: () => void;
+  dismissAlert: () => Promise<void>;
+  respondToAlert: () => Promise<void>;
 }
-
-function isFallEvent(log: SensorLog): boolean {
-  return log.tipo === "ALERTA" && log.msg.toUpperCase().includes("QUEDA");
-}
-
-const MOCK_FALL_ALERT: FallAlert = {
-  id: `alert-test`,
-  patientId: "patient-001",
-  patientName: "Carlos Eduardo",
-  location: "Ala B • Quarto 102",
-  detectedAt: new Date(),
-  status: "pending",
-};
 
 export function useFallDetection(): UseFallDetectionReturn {
   const [activeAlert, setActiveAlert] = useState<FallAlert | null>(null);
-  const [lastChecked, setLastChecked] = useState<string | null>(null);
+  const activeAlertRef = useRef<FallAlert | null>(null);
 
-  // Listener para teste sem Flask
   useEffect(() => {
-    function handleTestAlert() {
-      setActiveAlert({ ...MOCK_FALL_ALERT, detectedAt: new Date(), id: `alert-${Date.now()}` });
-    }
-    window.addEventListener("test-fall-alert", handleTestAlert);
-    return () => window.removeEventListener("test-fall-alert", handleTestAlert);
-  }, []);
+    activeAlertRef.current = activeAlert;
+  }, [activeAlert]);
 
   const checkForFall = useCallback(async () => {
     try {
-      const response = await fetch("http://localhost:8080/api/logs");
-      if (!response.ok) return;
-      const logs: SensorLog[] = await response.json();
-      const latest = logs[0];
-      if (!latest || latest.hora === lastChecked) return;
-      if (isFallEvent(latest)) {
-        setLastChecked(latest.hora);
-        setActiveAlert({
-          id: `alert-${Date.now()}`,
-          patientId: "patient-001",
-          patientName: "Carlos Eduardo",
-          location: "Ala B • Quarto 102",
-          detectedAt: new Date(),
-          status: "pending",
-        });
+      const alerts = await apiFetch<ApiFallAlert[]>("/api/alerts?status=pending");
+      const latest = alerts[0];
+      if (!latest) {
+        setActiveAlert(null);
+        return;
+      }
+      if (activeAlertRef.current?.id !== latest.id) {
+        setActiveAlert({ ...latest, detectedAt: new Date(latest.detectedAt) });
       }
     } catch {
-      // Flask offline — falha silenciosa
+      // O painel continua utilizável durante uma interrupção temporária da API.
     }
-  }, [lastChecked]);
+  }, []);
 
   useEffect(() => {
-    const interval = setInterval(checkForFall, 2000);
-    return () => clearInterval(interval);
+    const initialCheck = window.setTimeout(() => void checkForFall(), 0);
+    const interval = window.setInterval(() => void checkForFall(), 2000);
+    return () => {
+      window.clearTimeout(initialCheck);
+      window.clearInterval(interval);
+    };
   }, [checkForFall]);
 
-  const dismissAlert = useCallback(() => {
+  const resolveAlert = useCallback(async (status: AlertStatus) => {
+    const alert = activeAlertRef.current;
+    if (!alert || status === "pending") return;
+    await apiFetch<ApiFallAlert>(`/api/alerts/${encodeURIComponent(alert.id)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
     setActiveAlert(null);
   }, []);
 
-  const respondToAlert = useCallback(() => {
-    setActiveAlert(null);
-  }, []);
+  const dismissAlert = useCallback(
+    () => resolveAlert("dismissed"),
+    [resolveAlert]
+  );
+  const respondToAlert = useCallback(
+    () => resolveAlert("responded"),
+    [resolveAlert]
+  );
 
   return { activeAlert, dismissAlert, respondToAlert };
 }

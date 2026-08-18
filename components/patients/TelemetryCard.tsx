@@ -40,7 +40,17 @@ const statusConfig = {
   },
 };
 
-function WifiStrength({ signal }: { signal: number }) {
+function WifiStrength({ signal }: { signal: number | null | undefined }) {
+  if (signal === null || signal === undefined) {
+    return (
+      <div className="flex flex-col items-center gap-1 text-slate-400">
+        <Wifi size={22} />
+        <span className="text-xs font-semibold">-- dBm</span>
+        <span className="text-[10px] uppercase tracking-wide">Sem leitura</span>
+      </div>
+    );
+  }
+
   // Converte dBm em qualidade descritiva
   const quality =
     signal >= -60
@@ -55,7 +65,7 @@ function WifiStrength({ signal }: { signal: number }) {
     <div className="flex flex-col items-center gap-1">
       <Wifi size={22} className={quality.color} />
       <span className={`text-xs font-semibold ${quality.color}`}>
-        {signal} dBm
+        {Math.round(signal)} dBm
       </span>
       <span className="text-[10px] text-slate-400 uppercase tracking-wide">
         {quality.label}
@@ -64,8 +74,8 @@ function WifiStrength({ signal }: { signal: number }) {
   );
 }
 
-function BatteryLevel({ level }: { level: number }) {
-  const isCritical = level < 20;
+function BatteryLevel({ level }: { level: number | null }) {
+  const isCritical = level !== null && level < 20;
   const color = isCritical ? "text-red-500" : "text-slate-700";
 
   return (
@@ -75,7 +85,7 @@ function BatteryLevel({ level }: { level: number }) {
         className={isCritical ? "text-red-500" : "text-slate-600"}
       />
       <span className={`text-2xl font-black tabular-nums ${color}`}>
-        {level}%
+        {level === null ? "--" : `${Math.round(level)}%`}
       </span>
       {isCritical && (
         <span className="text-[10px] text-red-500 font-semibold uppercase tracking-wide">
@@ -88,13 +98,21 @@ function BatteryLevel({ level }: { level: number }) {
 
 export function TelemetryCard({ patient }: TelemetryCardProps) {
   const status = statusConfig[patient.status];
-
-  // Mock de telemetria — será substituído por dados reais do Flask
-  const telemetry = {
-    timeInActivity: "00:45:12",
-    fallsThisMonth: 0,
-    lastUpdate: "Agora",
-  };
+  const totalSeconds = patient.activityDurationSeconds ?? 0;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const timeInActivity = [hours, minutes, seconds]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+  const lastUpdate = patient.lastUpdate
+    ? new Date(patient.lastUpdate).toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      })
+    : "Sem dados";
+  const fallsThisMonth = patient.fallsThisMonth ?? 0;
 
   return (
     <div
@@ -115,7 +133,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
           </span>
         </div>
         <span className="text-[11px] uppercase tracking-wide" style={{ color: "var(--text-muted)" }}>
-          Atualizado: {telemetry.lastUpdate}
+          Atualizado: {lastUpdate}
         </span>
       </div>
 
@@ -140,7 +158,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
           <span className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
             Sinal Wi-Fi
           </span>
-          <WifiStrength signal={-65} />
+          <WifiStrength signal={patient.wifiSignal} />
         </div>
       </div>
 
@@ -152,7 +170,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
             <span className="text-xs">Tempo na atividade atual</span>
           </div>
           <span className="text-sm font-bold tabular-nums" style={{ color: "var(--text-primary)" }}>
-            {telemetry.timeInActivity}
+            {timeInActivity}
           </span>
         </div>
 
@@ -164,10 +182,10 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
           <span
             className="text-sm font-bold tabular-nums"
             style={{
-              color: telemetry.fallsThisMonth > 0 ? "#ef4444" : "var(--text-primary)",
+              color: fallsThisMonth > 0 ? "#ef4444" : "var(--text-primary)",
             }}
           >
-            {telemetry.fallsThisMonth}
+            {fallsThisMonth}
           </span>
         </div>
       </div>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ChevronRight } from "lucide-react";
 import type { Patient } from "@/types";
 
@@ -49,9 +50,12 @@ function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
 
   if (avatarUrl) {
     return (
-      <img
+      <Image
         src={avatarUrl}
         alt={name}
+        width={44}
+        height={44}
+        unoptimized
         className="w-11 h-11 rounded-full object-cover ring-2 ring-slate-100"
       />
     );
@@ -67,7 +71,7 @@ function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
 export function PatientCard({ patient }: PatientCardProps) {
   const status = statusConfig[patient.status];
   const risk = riskConfig[patient.riskLevel];
-  const isBatteryCritical = patient.battery < 20;
+  const isBatteryCritical = patient.battery !== null && patient.battery < 20;
 
   return (
     <div
@@ -122,9 +126,11 @@ export function PatientCard({ patient }: PatientCardProps) {
             }`}
             style={!isBatteryCritical ? { color: "var(--text-secondary)" } : {}}
           >
-            🔋 {patient.battery}%
+            🔋 {patient.battery === null ? "--" : `${Math.round(patient.battery)}%`}
           </span>
-          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>📶</span>
+          <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+            📶 {patient.wifiSignal === null || patient.wifiSignal === undefined ? "--" : `${Math.round(patient.wifiSignal)} dBm`}
+          </span>
         </div>
         <Link
           href={`/patients/${patient.id}`}

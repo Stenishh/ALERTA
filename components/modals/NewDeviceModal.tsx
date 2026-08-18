@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { X, Cpu } from "lucide-react";
 import type { RiskLevel } from "@/types";
+import { apiFetch } from "@/lib/api";
 
 interface NewDeviceModalProps {
   onClose?: () => void;
@@ -20,7 +21,12 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
   const [mac, setMac] = useState("");
   const [chipId, setChipId] = useState("");
   const [patientName, setPatientName] = useState("");
+  const [ward, setWard] = useState("");
+  const [room, setRoom] = useState("");
+  const [bedId, setBedId] = useState("");
   const [riskLevel, setRiskLevel] = useState<RiskLevel>("low");
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   function handleClose() {
     if (onClose) {
@@ -30,9 +36,34 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
     }
   }
 
-  function handleSubmit() {
-    console.log({ mac, chipId, patientName, riskLevel });
-    handleClose();
+  async function handleSubmit() {
+    if (!isValid || isSaving) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      await apiFetch("/api/devices", {
+        method: "POST",
+        body: JSON.stringify({
+          deviceId: mac.trim(),
+          chipId: chipId.trim(),
+          patientName: patientName.trim(),
+          ward: ward.trim(),
+          room: room.trim(),
+          bedId: bedId.trim(),
+          riskLevel,
+        }),
+      });
+      router.refresh();
+      handleClose();
+    } catch (requestError) {
+      setError(
+        requestError instanceof Error
+          ? requestError.message
+          : "Não foi possível registrar o dispositivo."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   const isValid = mac.trim() !== "" && patientName.trim() !== "";
@@ -43,7 +74,7 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
           style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
-          className="rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border"
+          className="rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-hidden border flex flex-col"
         >
           {/* Cabeçalho */}
           <div
@@ -59,7 +90,7 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
           </div>
 
           {/* Corpo */}
-          <div className="px-6 py-5 flex flex-col gap-5">
+          <div className="px-6 py-5 flex flex-col gap-5 overflow-y-auto">
 
             {/* MAC Address */}
             <div className="flex flex-col gap-1.5">
@@ -122,6 +153,63 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
               />
             </div>
 
+            {/* Localização */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1.5">
+                <label style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
+                  Ala
+                </label>
+                <input
+                  type="text"
+                  value={ward}
+                  onChange={(event) => setWard(event.target.value)}
+                  placeholder="Ex: Ala B"
+                  style={{
+                    backgroundColor: "var(--bg-card-inner)",
+                    borderColor: "var(--border)",
+                    color: "var(--text-primary)",
+                  }}
+                  className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none placeholder:text-slate-500"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
+                  Quarto
+                </label>
+                <input
+                  type="text"
+                  value={room}
+                  onChange={(event) => setRoom(event.target.value)}
+                  placeholder="Ex: Quarto 102"
+                  style={{
+                    backgroundColor: "var(--bg-card-inner)",
+                    borderColor: "var(--border)",
+                    color: "var(--text-primary)",
+                  }}
+                  className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none placeholder:text-slate-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
+                Identificação do leito
+                <span style={{ color: "var(--text-muted)" }} className="font-normal ml-1">(opcional)</span>
+              </label>
+              <input
+                type="text"
+                value={bedId}
+                onChange={(event) => setBedId(event.target.value)}
+                placeholder="Ex: B102-A"
+                style={{
+                  backgroundColor: "var(--bg-card-inner)",
+                  borderColor: "var(--border)",
+                  color: "var(--text-primary)",
+                }}
+                className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none placeholder:text-slate-500"
+              />
+            </div>
+
             {/* Grau de risco */}
             <div className="flex flex-col gap-2">
               <label style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
@@ -157,9 +245,10 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
             style={{ borderTopColor: "var(--border)" }}
             className="flex flex-col gap-2 px-6 py-4 border-t"
           >
+            {error && <p className="text-center text-xs text-red-500">{error}</p>}
             <button
               onClick={handleSubmit}
-              disabled={!isValid}
+              disabled={!isValid || isSaving}
               style={
                 isValid
                   ? { backgroundColor: "var(--accent)", color: "#020617" }
@@ -168,7 +257,7 @@ export function NewDeviceModal({ onClose }: NewDeviceModalProps) {
               className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all disabled:cursor-not-allowed"
             >
               <Cpu size={15} />
-              Registrar Dispositivo
+              {isSaving ? "Registrando..." : "Registrar Dispositivo"}
             </button>
             <p style={{ color: "var(--text-muted)" }} className="text-center text-xs">
               Ao registrar, o dispositivo iniciará o pareamento automaticamente.

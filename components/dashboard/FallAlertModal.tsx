@@ -6,11 +6,10 @@ import { AlertTriangle } from "lucide-react";
 
 interface FallAlertModalProps {
   alert: FallAlert;
-  onRespond: () => Promise<void>;
-  onDismiss: () => Promise<void>;
+  onAcknowledge: () => Promise<void>;
 }
 
-export function FallAlertModal({ alert, onRespond, onDismiss }: FallAlertModalProps) {
+export function FallAlertModal({ alert, onAcknowledge }: FallAlertModalProps) {
   const [isResolving, setIsResolving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,28 +72,18 @@ export function FallAlertModal({ alert, onRespond, onDismiss }: FallAlertModalPr
               </div>
             </div>
 
-            {/* Botões */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => void handleAction(onRespond)}
-                disabled={isResolving}
-                className="flex-1 bg-red-600 hover:bg-red-700 active:scale-95 transition-all text-white font-bold text-sm py-3 rounded-xl"
-              >
-                RESPONDER AGORA
-              </button>
-              <button
-                onClick={() => void handleAction(onDismiss)}
-                disabled={isResolving}
-                className="flex-1 active:scale-95 transition-all text-slate-700 font-medium text-sm py-3 rounded-xl border-2 border-slate-200 bg-white hover:bg-slate-50"
-              >
-                FALSO ALERTA
-              </button>
-            </div>
+            <button
+              onClick={() => void handleAction(onAcknowledge)}
+              disabled={isResolving}
+              className="w-full bg-red-600 hover:bg-red-700 active:scale-95 disabled:cursor-wait disabled:opacity-70 transition-all text-white font-bold text-sm py-3 rounded-xl"
+            >
+              {isResolving ? "CONFIRMANDO..." : "OK — ENCERRAR ALERTA"}
+            </button>
 
             {error && <p className="text-center text-red-500 text-xs">{error}</p>}
 
             <p className="text-center text-slate-400 text-xs">
-              Este alerta não pode ser ignorado sem uma ação
+              Ao confirmar, a atividade do dispositivo voltará ao estado normal
             </p>
           </div>
 

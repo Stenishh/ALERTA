@@ -89,7 +89,7 @@ def normalized_text(value):
 
 def sensor_status(raw_status):
     status = normalized_text(raw_status)
-    if "QUEDA CONFIRMADA" in status:
+    if "QUEDA CONFIRMADA" in status or "APOS QUEDA" in status:
         return "fall_detected"
     if "MOVIMENTO" in status or "ANALISANDO" in status:
         return "moving"
@@ -136,6 +136,8 @@ def new_device(device_id):
         "fallHistory": [],
         "medicalRecord": None,
         "activeAlertId": None,
+        "fallEventActive": False,
+        "fallAcknowledgePending": False,
         "resetPending": False,
     }
 
@@ -248,7 +250,11 @@ def get_logs():
 @app.route("/api/patients", methods=["GET"])
 def get_patients():
     with state_lock:
-        patients = [public_device(device) for device in state["devices"].values()]
+        patients = [
+            public_device(device)
+            for device in state["devices"].values()
+            if device.get("registered")
+        ]
         patients.sort(key=lambda patient: patient["name"].lower())
         return jsonify(patients), 200
 
@@ -295,6 +301,32 @@ def patient_detail(patient_id):
             }
         save_state()
         return jsonify(public_device(device)), 200
+
+
+@app.route("/api/patients/<patient_id>/record", methods=["DELETE"])
+def delete_patient_record(patient_id):
+    with state_lock:
+        device = get_device_by_patient_id(patient_id)
+        if not device:
+            return error_response("Registro do paciente não encontrado.", 404)
+
+        device_key = next(
+            key for key, candidate in state["devices"].items() if candidate is device
+        )
+        device_id = device.get("deviceId")
+        state["alerts"] = [
+            alert
+            for alert in state["alerts"]
+            if alert.get("patientId") != patient_id
+        ]
+        state["logs"] = [
+            entry
+            for entry in state["logs"]
+            if entry.get("deviceId") != device_id
+        ]
+        del state["devices"][device_key]
+        save_state()
+        return jsonify({"status": "success"}), 200
 
 
 @app.route("/api/devices", methods=["POST"])
@@ -358,11 +390,9 @@ def update_alert(alert_id):
         device = get_device_by_patient_id(alert["patientId"])
         if device and device.get("activeAlertId") == alert_id:
             device["activeAlertId"] = None
-            next_status = sensor_status(device.get("rawStatus"))
-            if next_status == "fall_detected":
-                next_status = "stopped"
-            if device.get("status") != next_status:
-                device["status"] = next_status
+            device["fallAcknowledgePending"] = True
+            if device.get("status") != "stopped":
+                device["status"] = "stopped"
                 device["statusSince"] = iso_now()
         add_log(
             "COMANDO",
@@ -434,13 +464,18 @@ def sensor_data():
     key = normalize_device_id(device_id)
     with state_lock:
         device = state["devices"].get(key) or new_device(device_id)
-        previous_raw_status = normalized_text(device.get("rawStatus"))
         incoming_status = sensor_status(raw_status)
         is_new_fall = (
             incoming_status == "fall_detected"
-            and "QUEDA CONFIRMADA" not in previous_raw_status
+            and not device.get("fallEventActive")
             and not device.get("activeAlertId")
+            and bool(device.get("registered"))
         )
+
+        if incoming_status == "fall_detected":
+            device["fallEventActive"] = True
+        else:
+            device["fallEventActive"] = False
 
         device["deviceId"] = device_id.upper()
         if data.get("chipId"):
@@ -503,10 +538,20 @@ def sensor_data():
         if reset_requested:
             device["resetPending"] = False
 
+        fall_acknowledged = bool(device.get("fallAcknowledgePending"))
+        if fall_acknowledged:
+            device["fallAcknowledgePending"] = False
+
         state["devices"][key] = device
         save_state()
 
-    return jsonify({"status": "success", "reset": reset_requested}), 200
+    return jsonify(
+        {
+            "status": "success",
+            "reset": reset_requested,
+            "acknowledgeFall": fall_acknowledged,
+        }
+    ), 200
 
 
 if not state["logs"]:

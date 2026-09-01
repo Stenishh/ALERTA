@@ -10,8 +10,8 @@ import { Search, LayoutGrid, List } from "lucide-react";
 import Link from "next/link";
 
 export default function DashboardPage() {
-  const { patients, metrics, isLoading, error } = usePatients();
-  const { activeAlert, respondToAlert, dismissAlert } = useFallDetection();
+  const { patients, metrics, isLoading, error, refresh } = usePatients();
+  const { activeAlert, acknowledgeAlert } = useFallDetection();
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
@@ -25,6 +25,11 @@ export default function DashboardPage() {
   );
   const offlineDevices = patients.filter((patient) => patient.status === "offline");
 
+  async function acknowledgeFall() {
+    await acknowledgeAlert();
+    await refresh();
+  }
+
   return (
     <div className="flex flex-col h-full gap-6">
 
@@ -32,8 +37,7 @@ export default function DashboardPage() {
       {activeAlert && (
         <FallAlertModal
           alert={activeAlert}
-          onRespond={respondToAlert}
-          onDismiss={dismissAlert}
+          onAcknowledge={acknowledgeFall}
         />
       )}
 

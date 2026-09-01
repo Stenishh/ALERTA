@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import type { AlertStatus, FallAlert } from "@/types";
+import type { FallAlert } from "@/types";
 
 interface ApiFallAlert extends Omit<FallAlert, "detectedAt"> {
   detectedAt: string;
@@ -10,11 +10,10 @@ interface ApiFallAlert extends Omit<FallAlert, "detectedAt"> {
 
 interface UseFallDetectionReturn {
   activeAlert: FallAlert | null;
-  dismissAlert: () => Promise<void>;
-  respondToAlert: () => Promise<void>;
+  acknowledgeAlert: () => Promise<void>;
 }
 
-export function useFallDetection(): UseFallDetectionReturn {
+export function useFallDetection(patientId?: string): UseFallDetectionReturn {
   const [activeAlert, setActiveAlert] = useState<FallAlert | null>(null);
   const activeAlertRef = useRef<FallAlert | null>(null);
 
@@ -25,7 +24,9 @@ export function useFallDetection(): UseFallDetectionReturn {
   const checkForFall = useCallback(async () => {
     try {
       const alerts = await apiFetch<ApiFallAlert[]>("/api/alerts?status=pending");
-      const latest = alerts[0];
+      const latest = patientId
+        ? alerts.find((alert) => alert.patientId === patientId)
+        : alerts[0];
       if (!latest) {
         setActiveAlert(null);
         return;
@@ -36,35 +37,27 @@ export function useFallDetection(): UseFallDetectionReturn {
     } catch {
       // O painel continua utilizável durante uma interrupção temporária da API.
     }
-  }, []);
+  }, [patientId]);
 
   useEffect(() => {
     const initialCheck = window.setTimeout(() => void checkForFall(), 0);
-    const interval = window.setInterval(() => void checkForFall(), 2000);
+    const interval = window.setInterval(() => void checkForFall(), 750);
     return () => {
       window.clearTimeout(initialCheck);
       window.clearInterval(interval);
     };
   }, [checkForFall]);
 
-  const resolveAlert = useCallback(async (status: AlertStatus) => {
+  const acknowledgeAlert = useCallback(async () => {
     const alert = activeAlertRef.current;
-    if (!alert || status === "pending") return;
+    if (!alert) return;
     await apiFetch<ApiFallAlert>(`/api/alerts/${encodeURIComponent(alert.id)}`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status: "responded" }),
     });
+    activeAlertRef.current = null;
     setActiveAlert(null);
   }, []);
 
-  const dismissAlert = useCallback(
-    () => resolveAlert("dismissed"),
-    [resolveAlert]
-  );
-  const respondToAlert = useCallback(
-    () => resolveAlert("responded"),
-    [resolveAlert]
-  );
-
-  return { activeAlert, dismissAlert, respondToAlert };
+  return { activeAlert, acknowledgeAlert };
 }

@@ -81,6 +81,17 @@ class AlertApiTest(unittest.TestCase):
             self.client.get("/api/alerts?status=pending").get_json(), []
         )
 
+        current = self.client.get("/api/patients/device-aabbccddeeff").get_json()
+        self.assertEqual(current["status"], "stopped")
+
+        first_sensor_response = self.client.post("/api/sensor", json=payload).get_json()
+        second_sensor_response = self.client.post("/api/sensor", json=payload).get_json()
+        self.assertTrue(first_sensor_response["acknowledgeFall"])
+        self.assertFalse(second_sensor_response["acknowledgeFall"])
+        self.assertEqual(
+            self.client.get("/api/alerts?status=pending").get_json(), []
+        )
+
     def test_reset_is_delivered_in_next_sensor_response(self):
         patient = self.register_device()
         scheduled = self.client.post(f"/api/devices/{patient['id']}/reset")
@@ -98,6 +109,52 @@ class AlertApiTest(unittest.TestCase):
         second_response = self.client.post("/api/sensor", json=payload).get_json()
         self.assertTrue(first_response["reset"])
         self.assertFalse(second_response["reset"])
+
+    def test_post_fall_status_opens_only_one_alert_until_normal(self):
+        self.register_device()
+        post_fall_payload = {
+            "deviceId": "AA:BB:CC:DD:EE:FF",
+            "status": "PARADO APOS QUEDA",
+            "checkpoint": 10,
+            "battery": 65,
+            "batteryVoltage": 3.8,
+            "wifiRssi": -58,
+        }
+
+        self.client.post("/api/sensor", json=post_fall_payload)
+        alerts = self.client.get("/api/alerts?status=pending").get_json()
+        self.assertEqual(len(alerts), 1)
+
+        self.client.patch(
+            f"/api/alerts/{alerts[0]['id']}", json={"status": "responded"}
+        )
+        acknowledged = self.client.post(
+            "/api/sensor", json=post_fall_payload
+        ).get_json()
+        self.assertTrue(acknowledged["acknowledgeFall"])
+        self.client.post("/api/sensor", json=post_fall_payload)
+        self.assertEqual(
+            self.client.get("/api/alerts?status=pending").get_json(), []
+        )
+
+        normal_payload = {**post_fall_payload, "status": "PARADO", "checkpoint": 11}
+        self.client.post("/api/sensor", json=normal_payload)
+        self.client.post("/api/sensor", json=post_fall_payload)
+        self.assertEqual(
+            len(self.client.get("/api/alerts?status=pending").get_json()),
+            1,
+        )
+
+    def test_patient_record_can_be_deleted(self):
+        patient = self.register_device()
+        response = self.client.delete(f"/api/patients/{patient['id']}/record")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/api/patients").get_json(), [])
+        self.assertEqual(
+            self.client.get(f"/api/patients/{patient['id']}").status_code,
+            404,
+        )
 
 
 if __name__ == "__main__":

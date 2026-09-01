@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { usePatient } from "@/hooks/usePatients";
+import { useFallDetection } from "@/hooks/useFallDetection";
 import { apiFetch } from "@/lib/api";
+import { FallAlertModal } from "@/components/dashboard/FallAlertModal";
 import { PatientHeader } from "@/components/patients/PatientHeader";
 import { TelemetryCard } from "@/components/patients/TelemetryCard";
 import { MedicalRecordCard } from "@/components/patients/MedicalRecordCard";
@@ -14,6 +16,7 @@ export default function PatientPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { patient, isLoading, error, refresh } = usePatient(id);
+  const { activeAlert, acknowledgeAlert } = useFallDetection(id);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -32,10 +35,22 @@ export default function PatientPage() {
     router.push("/");
   }
 
+  async function deletePatientRecord() {
+    await apiFetch(`/api/patients/${encodeURIComponent(id)}/record`, {
+      method: "DELETE",
+    });
+    router.push("/");
+  }
+
   async function resetDevice() {
     await apiFetch(`/api/devices/${encodeURIComponent(id)}/reset`, {
       method: "POST",
     });
+  }
+
+  async function acknowledgeFall() {
+    await acknowledgeAlert();
+    await refresh();
   }
 
   if (isLoading) {
@@ -53,6 +68,14 @@ export default function PatientPage() {
   return (
     <div className="flex flex-col gap-6 h-full">
 
+      {/* O alerta desta pessoa também aparece enquanto o perfil está aberto. */}
+      {activeAlert && (
+        <FallAlertModal
+          alert={activeAlert}
+          onAcknowledge={acknowledgeFall}
+        />
+      )}
+
       {/* Modal de ficha médica */}
       {isModalOpen && (
         <MedicalRecordModal
@@ -68,6 +91,7 @@ export default function PatientPage() {
         patient={patient}
         onEditMedicalRecord={() => setIsModalOpen(true)}
         onUnlink={unlinkDevice}
+        onDelete={deletePatientRecord}
         onReset={resetDevice}
       />
 

@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Unlink, Pencil, AlertTriangle, RotateCcw } from "lucide-react";
+import { ArrowLeft, Unlink, Pencil, AlertTriangle, RotateCcw, Trash2 } from "lucide-react";
 import type { Patient } from "@/types";
 
 interface PatientHeaderProps {
   patient: Patient;
   onEditMedicalRecord: () => void;
   onUnlink: () => Promise<void>;
+  onDelete: () => Promise<void>;
   onReset: () => Promise<void>;
 }
 
@@ -19,28 +20,31 @@ const statusConfig = {
   offline: { label: "Offline", dot: "bg-slate-400" },
 };
 
-export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset }: PatientHeaderProps) {
+export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onDelete, onReset }: PatientHeaderProps) {
   const status = statusConfig[patient.status];
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [isUnlinking, setIsUnlinking] = useState(false);
-  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<"unlink" | "delete" | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
 
-  async function handleUnlink() {
-    setIsUnlinking(true);
-    setUnlinkError(null);
+  async function handleConfirmedAction() {
+    if (!confirmAction) return;
+    setIsProcessing(true);
+    setActionError(null);
     try {
-      await onUnlink();
-      setShowConfirm(false);
+      await (confirmAction === "delete" ? onDelete() : onUnlink());
+      setConfirmAction(null);
     } catch (requestError) {
-      setUnlinkError(
+      setActionError(
         requestError instanceof Error
           ? requestError.message
-          : "Não foi possível desvincular o colete."
+          : confirmAction === "delete"
+            ? "Não foi possível excluir o registro."
+            : "Não foi possível desvincular o colete."
       );
     } finally {
-      setIsUnlinking(false);
+      setIsProcessing(false);
     }
   }
 
@@ -64,10 +68,10 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset 
 
   return (
     <>
-      {/* Modal de confirmação de desvínculo */}
-      {showConfirm && (
+      {/* Modal de confirmação de desvínculo/exclusão */}
+      {confirmAction && (
         <>
-          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowConfirm(false)} />
+          <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setConfirmAction(null)} />
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
             <div className="rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" style={{ backgroundColor: "var(--bg-card)" }}>
               <div
@@ -78,24 +82,39 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset 
                   <AlertTriangle size={18} className="text-red-600" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm" style={{ color: "var(--text-primary)" }}>Desvincular Colete</h3>
-                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>Esta ação não pode ser desfeita</p>
+                  <h3 className="font-bold text-sm" style={{ color: "var(--text-primary)" }}>
+                    {confirmAction === "delete" ? "Excluir Registro" : "Desvincular Colete"}
+                  </h3>
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                    {confirmAction === "delete"
+                      ? "O cadastro e o histórico associado serão apagados"
+                      : "O colete ficará disponível para outro paciente"}
+                  </p>
                 </div>
               </div>
               <div className="px-6 py-4">
                 <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                  Tem certeza que deseja desvincular o colete{" "}
-                  <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.deviceId}</span> do paciente{" "}
-                  <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.name}</span>?
+                  {confirmAction === "delete" ? (
+                    <>
+                      Excluir permanentemente o registro de{" "}
+                      <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.name}</span>?
+                    </>
+                  ) : (
+                    <>
+                      Desvincular o colete{" "}
+                      <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.deviceId}</span> do paciente{" "}
+                      <span className="font-bold" style={{ color: "var(--text-primary)" }}>{patient.name}</span>?
+                    </>
+                  )}
                 </p>
-                {unlinkError && <p className="text-xs text-red-500 mt-3">{unlinkError}</p>}
+                {actionError && <p className="text-xs text-red-500 mt-3">{actionError}</p>}
               </div>
               <div
                 className="flex items-center gap-2 px-6 py-4 border-t"
                 style={{ borderColor: "var(--border)" }}
               >
                 <button
-                  onClick={() => setShowConfirm(false)}
+                  onClick={() => setConfirmAction(null)}
                   className="flex-1 py-2.5 rounded-xl text-sm font-medium transition-colors hover:opacity-80"
                   style={{
                     backgroundColor: "var(--bg-card-inner)",
@@ -107,11 +126,15 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset 
                   Cancelar
                 </button>
                 <button
-                  onClick={() => void handleUnlink()}
-                  disabled={isUnlinking}
+                  onClick={() => void handleConfirmedAction()}
+                  disabled={isProcessing}
                   className="flex-1 py-2.5 rounded-xl text-sm text-white bg-red-600 hover:bg-red-700 font-bold transition-colors"
                 >
-                  {isUnlinking ? "Desvinculando..." : "Sim, desvincular"}
+                  {isProcessing
+                    ? "Processando..."
+                    : confirmAction === "delete"
+                      ? "Sim, excluir"
+                      : "Sim, desvincular"}
                 </button>
               </div>
             </div>
@@ -164,7 +187,7 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset 
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {resetMessage && (
               <span className="max-w-48 text-right text-[10px]" style={{ color: "var(--text-muted)" }}>
                 {resetMessage}
@@ -187,11 +210,24 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onReset 
               Editar Ficha
             </button>
             <button
-              onClick={() => setShowConfirm(true)}
+              onClick={() => {
+                setActionError(null);
+                setConfirmAction("unlink");
+              }}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 border border-red-100 text-red-600 text-sm font-medium transition-all"
             >
               <Unlink size={14} />
               Desvincular Colete
+            </button>
+            <button
+              onClick={() => {
+                setActionError(null);
+                setConfirmAction("delete");
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 border border-red-700 text-white text-sm font-medium transition-all"
+            >
+              <Trash2 size={14} />
+              Excluir Registro
             </button>
           </div>
         </div>

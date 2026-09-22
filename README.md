@@ -173,15 +173,40 @@ estimada de 3 segundos e só exibe sucesso após receber o resultado do ESP32.
 Falhas são informadas; sem confirmação em 30 segundos, a espera expira.
 **Reiniciar dispositivo** também abre uma confirmação antes de enviar o comando.
 
-A lógica exige aceleração total acima de 18 m/s², seguida de inclinação maior
-que 60° em relação à referência por 1,2 s, dentro de uma janela de 4 s. Durante
-a confirmação, a rotação deve ser de até 30°/s e a aceleração deve estar próxima
-da gravidade (tolerância de 2 m/s²). Giros isolados não iniciam a detecção.
-Pausas de leitura acima de 250 ms reiniciam a confirmação da postura.
-Esses limiares são parâmetros do protótipo e podem deixar de detectar quedas
-com pouco impacto ou com movimento contínuo após o impacto; a mudança de montagem ainda precisa ser validada fisicamente em
-ambos os locais. O teste de orientação pode ser executado com
-`python3 -m unittest discover -s tests -v` (requer `clang++`).
+O firmware **2.7** usa a magnitude dos três eixos, sem depender de qual face
+está voltada para cima. Há duas formas de confirmar uma queda dentro de 4 s:
+
+- Impacto acima de 13 m/s² ou queda livre sustentada abaixo de 3,5 m/s² por
+  pelo menos 100 ms, seguidos de inclinação maior que 60° da referência.
+- Queda livre sustentada **antes** do impacto, seguida de estabilização em
+  qualquer posição, inclusive sentada ou vertical. Se o evento começar com
+  impacto, essa segunda via fica desativada para reduzir alertas de saltos.
+
+As duas vias exigem 1,2 s de confirmação, aceleração próxima de 1 g (tolerância
+2 m/s²) e rotação de até 90°/s. Lacunas acima de 250 ms reiniciam a confirmação;
+acima de 75 ms interrompem a contagem contínua de queda livre. Durante a análise,
+o envio HTTP e a reconexão Wi-Fi são adiados para preservar as leituras.
+O alerta confirmado permanece ativo até o atendimento no painel.
+
+A velocidade estimada também participa da decisão: a queda livre usa o tempo
+abaixo de 3,5 m/s² e o impacto acumula o impulso acelerométrico. Assim, uma
+inclinação lenta ou um toque isolado não basta para confirmar uma queda.
+
+A calibração rejeita leituras inválidas e movimentos, calcula os offsets do
+giroscópio e normaliza o módulo da gravidade. A referência de postura **não é**
+um offset do acelerômetro: subtraí-la eliminaria a gravidade indevidamente.
+Os parâmetros `ACC_OFFSET_X/Y/Z` aceitam bias em m/s² medido por calibração em
+seis faces; o padrão é zero, porque uma única postura não permite determinar
+os três offsets independentemente. Essas correções são aplicadas antes dos
+limiares e do cálculo de postura. Deitado e imóvel passa a ser `PARADO`.
+
+Os testes sintéticos cobrem diferentes montagens, quedas à frente, atrás,
+laterais, inversão, posição final vertical, offsets, giros, impulsos de salto,
+lacunas e leituras inválidas. Execute `python3 -B -m unittest discover -s tests -v`
+(requer `clang++`). Os limiares ainda precisam de validação física com o sensor
+fixado: quedas lentas, pouca queda livre e saltos com impulso não amostrado
+podem causar perdas ou falsos alertas. O HTTP continua síncrono fora da análise,
+podendo ocultar o início de um evento. Não há garantia de detectar toda queda.
 
 ### Contrato principal da API
 

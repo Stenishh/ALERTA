@@ -13,7 +13,7 @@
  * - Alertas em tempo real
  * * Autor: Fernando Stein
  * Data: Janeiro 2026
- * Versão do firmware: 2.3
+ * Versão do firmware: 2.7
  */
 
 // ==========================================
@@ -28,7 +28,7 @@
 #include <esp_system.h>
 #include "time.h"
 
-const char* FIRMWARE_VERSION = "2.3";
+const char* FIRMWARE_VERSION = "2.7";
 
 // ==========================================
 // CONFIGURAÇÕES - EDITE AQUI!
@@ -63,14 +63,26 @@ const float BATTERY_MIN_VOLTAGE = 3.20;
 const float BATTERY_MAX_VOLTAGE = 4.20;
 
 // --- Limiares de Detecção de Queda ---
-const float IMPACT_THRESHOLD = 18.0;            // m/s² - modulo total, incluindo gravidade
-const float POSTURE_MAX_ROTATION = 30.0;        // °/s - postura so conta com pouca rotacao
+const float IMPACT_THRESHOLD = 13.0;            // m/s² - pico de impacto em qualquer eixo
+const float FREEFALL_THRESHOLD = 3.5;           // m/s² - queda livre antes do impacto
+const float POSTURE_MAX_ROTATION = 90.0;        // °/s - tolera giro residual apos a queda
 const float POSTURE_GRAVITY_TOLERANCE = 2.0;    // m/s² - rejeitar aceleracao dinamica
 // Angulo relativo a postura em pe calibrada: independe do eixo da montagem.
-const float LYING_ANGLE_DEGREES = 60.0;
+// Quedas laterais podem terminar semi-inclinadas por causa do cinto/colete.
+const float LYING_ANGLE_DEGREES = 35.0;
 const unsigned long IMPACT_WINDOW = 4000;       // prazo total apos impacto
 const unsigned long LYING_CONFIRMATION = 1200; // postura persistente por 1,2s
 const unsigned long MAX_POSTURE_SAMPLE_GAP = 250; // nao contar pausas sem leituras
+
+// Bias do acelerometro em m/s², obtido por calibracao em seis faces.
+// Uma unica postura nao permite separar os tres offsets da gravidade.
+const float ACC_OFFSET_X = 0.0f;
+const float ACC_OFFSET_Y = 0.0f;
+const float ACC_OFFSET_Z = 0.0f;
+const unsigned long MIN_FREEFALL_DURATION = 100;
+const unsigned long MAX_FREEFALL_SAMPLE_GAP = 75;
+const float MIN_FALL_SPEED_MPS = 0.0f;
+const float MIN_FREEFALL_SPEED_MPS = 0.80f;
 
 const unsigned long SENSOR_INTERVAL = 25;
 const unsigned long TELEMETRY_INTERVAL = 1000;
@@ -94,6 +106,14 @@ uint8_t activeSensorIdentity = 0;
 // Calibração
 float refAccX = 0, refAccY = 0, refAccZ = 0;
 float refGyroX = 0, refGyroY = 0, refGyroZ = 0;
+float accScale = 1.0f;
+
+bool candidateImpact = false, candidateFreefall = false;
+bool candidateStartedWithFreefall = false, candidateLanding = false;
+float candidateSpeedMps = 0;
+unsigned long freefallStart = 0;
+bool freefallActive = false;
+bool fallTriggerArmed = true;
 
 // Estados de detecção de queda
 enum FallState {
@@ -277,6 +297,7 @@ bool calibrateSensor() {
   
   float sumAccX = 0, sumAccY = 0, sumAccZ = 0;
   float sumGyroX = 0, sumGyroY = 0, sumGyroZ = 0;
+  float sumAccSquared = 0, sumGyroSquared = 0;
   const int samples = 100; // 1 s de preparo + 100 leituras de 20 ms = cerca de 3 s.
   
   for (int i = 0; i < samples; i++) {
@@ -285,6 +306,18 @@ bool calibrateSensor() {
       Serial.println("[I2C] Leitura incompleta na calibracao; sensor nao liberado.");
       return false;
     }
+    a.acceleration.x -= ACC_OFFSET_X;
+    a.acceleration.y -= ACC_OFFSET_Y;
+    a.acceleration.z -= ACC_OFFSET_Z;
+    const float magnitude = getTotalAcceleration(a.acceleration.x, a.acceleration.y, a.acceleration.z);
+    const float rotation = getTotalAcceleration(g.gyro.x, g.gyro.y, g.gyro.z);
+    if (!isfinite(magnitude) || !isfinite(rotation) ||
+        abs(magnitude - SENSORS_GRAVITY_STANDARD) > 2.0f || rotation > 0.35f) {
+      Serial.println("[CAL] Movimento ou leitura invalida. Repita em pe e parado.");
+      return false;
+    }
+    sumAccSquared += magnitude * magnitude;
+    sumGyroSquared += rotation * rotation;
     
     sumAccX += a.acceleration.x;
     sumAccY += a.acceleration.y;
@@ -297,9 +330,21 @@ bool calibrateSensor() {
     if (i % 10 == 0) Serial.print(".");
   }
   
+  const float meanAccSquared = (sumAccX*sumAccX + sumAccY*sumAccY + sumAccZ*sumAccZ) / (samples*samples);
+  const float meanGyroSquared = (sumGyroX*sumGyroX + sumGyroY*sumGyroY + sumGyroZ*sumGyroZ) / (samples*samples);
+  if (sumAccSquared / samples - meanAccSquared > 0.12f ||
+      sumGyroSquared / samples - meanGyroSquared > 0.0025f) {
+    Serial.println("[CAL] Postura instavel. Referencias anteriores preservadas.");
+    return false;
+  }
+  // Normalizacao escalar conserva a gravidade; nunca subtrair refAcc como bias.
+  accScale = SENSORS_GRAVITY_STANDARD / sqrt(meanAccSquared);
   refAccX = sumAccX / samples;
   refAccY = sumAccY / samples;
   refAccZ = sumAccZ / samples;
+  refAccX *= accScale;
+  refAccY *= accScale;
+  refAccZ *= accScale;
   refGyroX = sumGyroX / samples;
   refGyroY = sumGyroY / samples;
   refGyroZ = sumGyroZ / samples;
@@ -583,36 +628,48 @@ void sendSensorData(float accX, float accY, float accZ,
 
 String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g, 
                             float &accMagnitude, float &gyroMagnitude) {
-  // Calcular aceleração total
-  float totalAcc = getTotalAcceleration(a.acceleration.x, a.acceleration.y, a.acceleration.z);
-  
-  // Calcular diferenças em relação às referências
-  float diffAccX = abs(a.acceleration.x - refAccX);
-  float diffAccY = abs(a.acceleration.y - refAccY);
-  float diffAccZ = abs(a.acceleration.z - refAccZ);
-  float diffGyroX = abs(g.gyro.x - refGyroX);
-  float diffGyroY = abs(g.gyro.y - refGyroY);
-  float diffGyroZ = abs(g.gyro.z - refGyroZ);
-  
-  // Magnitudes de mudança
-  accMagnitude = sqrt(diffAccX*diffAccX + diffAccY*diffAccY + diffAccZ*diffAccZ);
-  gyroMagnitude = sqrt(diffGyroX*diffGyroX + diffGyroY*diffGyroY + diffGyroZ*diffGyroZ);
-  
-  // Converter giroscópio para graus/segundo
-  float gyroDegPerSec = gyroMagnitude * 57.2958; // rad/s para deg/s
-  
-  unsigned long currentTime = millis();
-  
+  const float ax = (a.acceleration.x - ACC_OFFSET_X) * accScale;
+  const float ay = (a.acceleration.y - ACC_OFFSET_Y) * accScale;
+  const float az = (a.acceleration.z - ACC_OFFSET_Z) * accScale;
+  const float gx = g.gyro.x - refGyroX;
+  const float gy = g.gyro.y - refGyroY;
+  const float gz = g.gyro.z - refGyroZ;
+  const float totalAcc = getTotalAcceleration(ax, ay, az);
+  gyroMagnitude = getTotalAcceleration(gx, gy, gz);
+  // Desvio do modulo de 1 g: ficar deitado e parado nao e movimento continuo.
+  accMagnitude = abs(totalAcc - SENSORS_GRAVITY_STANDARD);
+  const float gyroDegPerSec = gyroMagnitude * 57.2958f;
+  const unsigned long currentTime = millis();
+  if (fallState == FALL_CONFIRMED) return "QUEDA CONFIRMADA";
+  if (!isfinite(totalAcc) || !isfinite(gyroMagnitude)) {
+    fallState = NORMAL;
+    fallConfirmedTime = 0;
+    freefallActive = false;
+    return "ANALISANDO";
+  }
+  const bool impact = totalAcc > IMPACT_THRESHOLD;
+  const bool lowG = totalAcc < FREEFALL_THRESHOLD;
+
   // Máquina de estados de detecção de queda
   switch (fallState) {
     case NORMAL:
-      // Rotacao isolada e mudanca do vetor de gravidade nao sao impactos.
-      if (totalAcc > IMPACT_THRESHOLD) {
+      if (!impact && !lowG && gyroDegPerSec <= 20.0f) fallTriggerArmed = true;
+      // Rotacao isolada nao inicia a queda: exigimos pico de impacto ou queda livre.
+      // Os dois testes usam a magnitude dos tres eixos, entao valem para qualquer lado.
+      if (fallTriggerArmed && (impact || lowG)) {
+        fallTriggerArmed = false;
         fallState = SUDDEN_MOVEMENT_DETECTED;
         suddenMovementTime = currentTime;
         lastPostureSample = currentTime;
         fallConfirmedTime = 0;
         fallAlertShown = false;
+        candidateImpact = impact;
+        candidateFreefall = false;
+        candidateStartedWithFreefall = lowG;
+        candidateLanding = false;
+        candidateSpeedMps = 0;
+        freefallActive = lowG;
+        freefallStart = currentTime;
         Serial.println("\n⚠️  MOVIMENTO SÚBITO DETECTADO!");
         return "ANALISANDO MOVIMENTO";
       }
@@ -637,13 +694,37 @@ String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g,
       if (currentTime - lastPostureSample > MAX_POSTURE_SAMPLE_GAP) {
         fallConfirmedTime = 0;
       }
+      if (currentTime - lastPostureSample > MAX_FREEFALL_SAMPLE_GAP) freefallActive = false;
       lastPostureSample = currentTime;
-
+      if (lowG) {
+        if (!freefallActive) freefallStart = currentTime;
+        freefallActive = true;
+        const unsigned long freefallMs = currentTime - freefallStart;
+        if (freefallMs >= MIN_FREEFALL_DURATION) {
+          candidateFreefall = true;
+          candidateSpeedMps = fmaxf(candidateSpeedMps,
+                                  SENSORS_GRAVITY_STANDARD * freefallMs * 0.001f);
+        }
+      } else {
+        freefallActive = false;
+      }
+      if (impact) {
+        candidateImpact = true;
+        // Impulso aproximado durante a amostra de 25 ms.
+        candidateSpeedMps += fmaxf(0.0f, totalAcc - SENSORS_GRAVITY_STANDARD) *
+                             (SENSOR_INTERVAL * 0.001f);
+        if (candidateFreefall && candidateStartedWithFreefall) candidateLanding = true;
+      }
+      // Queda livre sustentada + impacto permitem qualquer postura final.
+      // Sem essa sequencia, um impacto exige inclinacao persistente.
+      const bool sequenceEvidence = candidateLanding && candidateSpeedMps >= MIN_FREEFALL_SPEED_MPS;
+      const bool postureEvidence = candidateSpeedMps >= MIN_FALL_SPEED_MPS &&
+          (candidateImpact || candidateFreefall) && isLyingPosition(ax, ay, az);
       // Acelerometro estima postura apenas quando predomina a gravidade.
       const bool stablePosture =
           abs(totalAcc - SENSORS_GRAVITY_STANDARD) <= POSTURE_GRAVITY_TOLERANCE &&
           gyroDegPerSec <= POSTURE_MAX_ROTATION &&
-          isLyingPosition(a.acceleration.x, a.acceleration.y, a.acceleration.z);
+          (postureEvidence || sequenceEvidence);
       if (!stablePosture) {
         fallConfirmedTime = 0;
         break;
@@ -652,7 +733,7 @@ String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g,
       if (currentTime - fallConfirmedTime >= LYING_CONFIRMATION) {
         fallState = FALL_CONFIRMED;
         fallAlertShown = true;
-        Serial.println("QUEDA CONFIRMADA: impacto seguido de inclinacao persistente.");
+        Serial.println("QUEDA CONFIRMADA: sequencia de queda/postura seguida de estabilidade.");
         return "QUEDA CONFIRMADA";
       }
       break;
@@ -725,7 +806,7 @@ void setup() {
 // ==========================================
 
 void loop() {
-  maintainWiFi();
+  if (fallState != SUDDEN_MOVEMENT_DETECTED) maintainWiFi();
 
   if (millis() - calibrationCommandTime > 30000) {
     calibrationRequested = false;
@@ -799,6 +880,9 @@ void loop() {
     Serial.println(">>> ============================== <<<\n");
     lastStatus = status;
   }
+
+  // HTTP sincrono pode bloquear por centenas de ms. Preservar a janela do evento.
+  if (fallState == SUDDEN_MOVEMENT_DETECTED) return;
 
   if (shouldPublish) {
     Serial.println("\n===== Leituras do Sensor =====");

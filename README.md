@@ -168,12 +168,18 @@ nessa postura para calibrar novamente.
 Na ficha do paciente, **Calibrar sensor** permite solicitar uma nova calibração
 sem reiniciar. Confirme as instruções no pop-up com a pessoa já em pé e parada.
 O dispositivo precisa estar online e com o firmware atualizado para receber o
-comando. A mensagem de solicitação indica o agendamento, não a conclusão física.
+comando. O pop-up aguarda o início confirmado pela placa, mostra uma contagem
+estimada de 3 segundos e só exibe sucesso após receber o resultado do ESP32.
+Falhas são informadas; sem confirmação em 30 segundos, a espera expira.
 **Reiniciar dispositivo** também abre uma confirmação antes de enviar o comando.
 
-Após um movimento súbito, a lógica verifica uma inclinação maior que 45° em
-relação à referência durante 300 ms. Esses limiares são os parâmetros do
-protótipo; a mudança de montagem ainda precisa ser validada fisicamente em
+A lógica exige aceleração total acima de 18 m/s², seguida de inclinação maior
+que 60° em relação à referência por 1,2 s, dentro de uma janela de 4 s. Durante
+a confirmação, a rotação deve ser de até 30°/s e a aceleração deve estar próxima
+da gravidade (tolerância de 2 m/s²). Giros isolados não iniciam a detecção.
+Pausas de leitura acima de 250 ms reiniciam a confirmação da postura.
+Esses limiares são parâmetros do protótipo e podem deixar de detectar quedas
+com pouco impacto ou com movimento contínuo após o impacto; a mudança de montagem ainda precisa ser validada fisicamente em
 ambos os locais. O teste de orientação pode ser executado com
 `python3 -m unittest discover -s tests -v` (requer `clang++`).
 
@@ -189,6 +195,7 @@ ambos os locais. O teste de orientação pode ser executado com
 | `PATCH` | `/api/alerts/:id` | Dashboard atende ou descarta uma queda |
 | `POST` | `/api/devices/:id/reset` | Agenda reset remoto do ESP32 |
 | `POST` | `/api/devices/:id/calibrate` | Agenda calibração remota do sensor |
+| `POST` | `/api/calibration` | ESP32 confirma início e resultado da calibração |
 
 ### Validação
 

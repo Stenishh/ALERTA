@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Unlink, Pencil, AlertTriangle, Trash2 } from "lucide-react";
 import { DeviceControls } from "@/components/patients/DeviceControls";
-import type { Patient } from "@/types";
+import type { Calibration, Patient } from "@/types";
 
 interface PatientHeaderProps {
   patient: Patient;
@@ -12,7 +12,7 @@ interface PatientHeaderProps {
   onUnlink: () => Promise<void>;
   onDelete: () => Promise<void>;
   onReset: () => Promise<void>;
-  onCalibrate: () => Promise<void>;
+  onCalibrate: () => Promise<Calibration>;
 }
 
 const statusConfig = {

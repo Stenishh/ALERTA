@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Crosshair, RotateCcw } from "lucide-react";
-import type { Patient } from "@/types";
+import type { Calibration, Patient } from "@/types";
 
 interface DeviceControlsProps {
   patient: Patient;
   onReset: () => Promise<void>;
-  onCalibrate: () => Promise<void>;
+  onCalibrate: () => Promise<Calibration>;
 }
 
 export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControlsProps) {
@@ -16,6 +16,17 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [job, setJob] = useState<Calibration | null>(null);
+  const [now, setNow] = useState(0);
+  const current = job && patient.calibration?.id === job.id ? patient.calibration : job;
+  const timedOut = current && now - Date.parse(current.requestedAt) > 30000;
+  const phase = current && (current.status === "pending" || current.status === "running") && timedOut
+    ? "timeout" : current?.status;
+  const inProgress = phase === "pending" || phase === "running";
+  const remaining = current?.startedAt
+    ? Math.min(Math.ceil(current.durationMs / 1000), Math.max(0, Math.ceil((current.durationMs - (now - Date.parse(current.startedAt))) / 1000)))
+    : Math.ceil((current?.durationMs ?? 3000) / 1000);
+  const tracking = action === "calibrate" && current !== null;
   const offline = patient.status === "offline";
 
   useEffect(() => {
@@ -23,9 +34,16 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
     else dialog.current?.close();
   }, [action]);
 
+  useEffect(() => {
+    if (!job || !inProgress) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 250);
+    return () => window.clearInterval(timer);
+  }, [job, inProgress]);
+
   function open(nextAction: "reset" | "calibrate") {
     setError(null);
     setMessage(null);
+    setJob(null);
     setAction(nextAction);
   }
 
@@ -34,11 +52,15 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
     setBusy(true);
     setError(null);
     try {
-      await (action === "reset" ? onReset() : onCalibrate());
-      setMessage(action === "reset"
-        ? "Reinício agendado. Aguarde a reconexão e permaneça em pé e parado durante a calibração."
-        : "Calibração solicitada. Permaneça em pé e parado nos próximos segundos. Aguarde novas leituras; o envio do comando não confirma a conclusão.");
-      setAction(null);
+      if (action === "calibrate") {
+        const scheduled = await onCalibrate();
+        setNow(Date.now());
+        setJob(scheduled);
+      } else {
+        await onReset();
+        setMessage("Reinício agendado. Aguarde a reconexão e permaneça em pé e parado durante a calibração.");
+        setAction(null);
+      }
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Não foi possível enviar o comando.");
     } finally {
@@ -51,10 +73,10 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
 
   return (
     <>
-      <button onClick={() => open("calibrate")} disabled={busy || offline} className={buttonClass} style={buttonStyle}>
+      <button onClick={() => open("calibrate")} disabled={busy || inProgress || offline} className={buttonClass} style={buttonStyle}>
         <Crosshair size={14} /> Calibrar sensor
       </button>
-      <button onClick={() => open("reset")} disabled={busy || offline} className={buttonClass} style={buttonStyle}>
+      <button onClick={() => open("reset")} disabled={busy || inProgress || offline} className={buttonClass} style={buttonStyle}>
         <RotateCcw size={14} /> Reiniciar dispositivo
       </button>
       {message && <p role="status" className="w-full text-right text-xs" style={{ color: "var(--text-muted)" }}>{message}</p>}
@@ -70,7 +92,7 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
         style={{ backgroundColor: "var(--bg-card)", color: "var(--text-primary)" }}
       >
         <h2 id="device-command-title" className="text-lg font-bold">
-          {action === "reset" ? "Reiniciar dispositivo?" : "Calibrar sensor?"}
+          {action === "reset" ? "Reiniciar dispositivo?" : phase === "completed" ? "Calibração concluída!" : tracking ? "Calibração do sensor" : "Calibrar sensor?"}
         </h2>
         <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{patient.name} · {patient.deviceId}</p>
         <div id="device-command-description" className="mt-4 space-y-3 text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -79,12 +101,24 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
             : "A calibração ajusta a referência de postura para a posição atual do sensor e pausa brevemente a detecção."}</p>
           <p>Prenda o sensor no colete ou cinto. A pessoa deve estar em pé e permanecer parada durante a calibração.</p>
         </div>
-        {(error || offline) && <p role="alert" className="mt-3 text-sm text-red-500">{error || "O dispositivo está offline. Aguarde a reconexão."}</p>}
+        {tracking && (
+          <div role="status" aria-live="polite" className="mt-5 rounded-xl p-4 text-center" style={{ backgroundColor: "var(--bg-card-inner)" }}>
+            {phase === "pending" && <><p>Aguardando o dispositivo iniciar…</p><p className="mt-2 text-sm">Tempo estimado de calibração: {remaining} segundos.</p></>}
+            {phase === "running" && <>
+              <p className="text-4xl font-bold tabular-nums">{remaining > 0 ? `${remaining}s` : "Aguarde…"}</p>
+              <p className="mt-2 text-sm">{remaining > 0 ? "Calibrando. Permaneça em pé e parado." : "Aguardando a confirmação do dispositivo."}</p>
+            </>}
+            {phase === "completed" && <p className="font-semibold text-emerald-600">Calibração feita com sucesso. O sensor confirmou a nova referência.</p>}
+            {phase === "failed" && <p className="text-red-500">Não foi possível concluir a calibração. Confira o sensor e tente novamente.</p>}
+            {phase === "timeout" && <p className="text-amber-600">O dispositivo não confirmou a calibração no prazo. Confira a conexão e se a placa está com o firmware atualizado.</p>}
+          </div>
+        )}
+        {(error || (offline && !tracking)) && <p role="alert" className="mt-3 text-sm text-red-500">{error || "O dispositivo está offline. Aguarde a reconexão."}</p>}
         <div className="mt-6 flex justify-end gap-2">
-          <button autoFocus disabled={busy} onClick={() => setAction(null)} className={buttonClass} style={buttonStyle}>Cancelar</button>
-          <button disabled={busy || offline} onClick={() => void confirm()} className={`${buttonClass} bg-slate-800 text-white`}>
+          <button autoFocus disabled={busy} onClick={() => setAction(null)} className={buttonClass} style={buttonStyle}>{tracking ? "Fechar" : "Cancelar"}</button>
+          {!tracking && <button disabled={busy || offline} onClick={() => void confirm()} className={`${buttonClass} bg-slate-800 text-white`}>
             {busy ? "Enviando..." : action === "reset" ? "Reiniciar" : "Iniciar calibração"}
-          </button>
+          </button>}
         </div>
       </dialog>
     </>

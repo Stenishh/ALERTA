@@ -118,6 +118,47 @@ class AlertApiTest(unittest.TestCase):
         self.assertFalse(first["calibrate"])
         self.assertFalse(second["calibrate"])
 
+    def test_calibration_progress_and_result_match_the_request(self):
+        patient = self.register_device()
+        payload = {"deviceId": patient["deviceId"], "status": "PARADO"}
+        self.client.post("/api/sensor", json=payload)
+        url = f"/api/devices/{patient['id']}/calibrate"
+        job = self.client.post(url).get_json()
+        self.assertEqual(job["status"], "pending")
+        self.assertEqual(self.client.post(url).status_code, 409)
+        reply = self.client.post("/api/sensor", json=payload).get_json()
+        self.assertEqual(reply["calibrationId"], job["id"])
+        report = {"deviceId": patient["deviceId"], "calibrationId": job["id"], "status": "completed"}
+        self.assertEqual(self.client.post("/api/calibration", json=report).status_code, 409)
+        report["status"] = "running"
+        started = self.client.post("/api/calibration", json=report).get_json()
+        self.assertIsNotNone(started["startedAt"])
+        self.assertEqual(self.client.post("/api/calibration", json=report).get_json()["startedAt"], started["startedAt"])
+        report["status"] = "completed"
+        self.assertEqual(self.client.post("/api/calibration", json=report).status_code, 200)
+        self.assertEqual(self.client.post("/api/calibration", json=report).status_code, 200)
+        current = self.client.get(f"/api/patients/{patient['id']}").get_json()
+        self.assertEqual(current["calibration"]["status"], "completed")
+        next_job = self.client.post(url).get_json()
+        self.assertNotEqual(job["id"], next_job["id"])
+        self.assertEqual(self.client.post("/api/calibration", json=report).status_code, 404)
+        report.update(calibrationId=next_job["id"], status="failed")
+        self.assertEqual(self.client.post("/api/calibration", json=report).get_json()["status"], "failed")
+
+    def test_calibration_timeout_does_not_report_success(self):
+        patient = self.register_device()
+        payload = {"deviceId": patient["deviceId"], "status": "PARADO"}
+        self.client.post("/api/sensor", json=payload)
+        self.client.post(f"/api/devices/{patient['id']}/calibrate")
+        device = backend.get_device_by_patient_id(patient["id"])
+        device["calibration"]["requestedAt"] = "2000-01-01T00:00:00+00:00"
+        current = self.client.get(f"/api/patients/{patient['id']}").get_json()
+        self.assertEqual(current["calibration"]["status"], "timeout")
+        reply = self.client.post("/api/sensor", json=payload).get_json()
+        self.assertFalse(reply["calibrate"])
+        report = {"deviceId": patient["deviceId"], "calibrationId": device["calibration"]["id"], "status": "completed"}
+        self.assertEqual(self.client.post("/api/calibration", json=report).status_code, 409)
+
     def test_reset_is_delivered_in_next_sensor_response(self):
         patient = self.register_device()
         scheduled = self.client.post(f"/api/devices/{patient['id']}/reset")

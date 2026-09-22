@@ -10,6 +10,14 @@ export type PatientStatus =
 
 export type RiskLevel = "low" | "medium" | "high";
 
+export interface Calibration {
+  id: string;
+  status: "pending" | "running" | "completed" | "failed" | "timeout";
+  durationMs: number;
+  requestedAt: string;
+  startedAt: string | null;
+}
+
 export interface Patient {
   id: string;
   name: string;
@@ -19,6 +27,7 @@ export interface Patient {
   riskLevel: RiskLevel;
   deviceId: string;
   battery: number | null;
+  calibration?: Calibration | null;
   batteryVoltage?: number | null;
   wifiSignal?: number | null;
   bedId?: string;

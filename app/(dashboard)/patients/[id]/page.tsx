@@ -10,7 +10,7 @@ import { PatientHeader } from "@/components/patients/PatientHeader";
 import { TelemetryCard } from "@/components/patients/TelemetryCard";
 import { MedicalRecordCard } from "@/components/patients/MedicalRecordCard";
 import { MedicalRecordModal } from "@/components/patients/MedicalRecordModal";
-import type { MedicalRecord } from "@/types";
+import type { Calibration, MedicalRecord } from "@/types";
 
 export default function PatientPage() {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +49,7 @@ export default function PatientPage() {
   }
 
   async function calibrateDevice() {
-    await apiFetch(`/api/devices/${encodeURIComponent(id)}/calibrate`, {
+    return apiFetch<Calibration>(`/api/devices/${encodeURIComponent(id)}/calibrate`, {
       method: "POST",
     });
   }

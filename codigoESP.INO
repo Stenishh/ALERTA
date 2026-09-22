@@ -63,12 +63,14 @@ const float BATTERY_MIN_VOLTAGE = 3.20;
 const float BATTERY_MAX_VOLTAGE = 4.20;
 
 // --- Limiares de Detecção de Queda ---
-const float IMPACT_THRESHOLD = 12.0;            // m/s² - Impacto forte
-const float ROTATION_THRESHOLD = 150.0;         // °/s - Rotação brusca
+const float IMPACT_THRESHOLD = 18.0;            // m/s² - modulo total, incluindo gravidade
+const float POSTURE_MAX_ROTATION = 30.0;        // °/s - postura so conta com pouca rotacao
+const float POSTURE_GRAVITY_TOLERANCE = 2.0;    // m/s² - rejeitar aceleracao dinamica
 // Angulo relativo a postura em pe calibrada: independe do eixo da montagem.
-const float LYING_ANGLE_DEGREES = 45.0;
-const unsigned long IMPACT_WINDOW = 500;        // no máximo 0,5s analisando
-const unsigned long LYING_CONFIRMATION = 300;   // confirma a queda em 0,3s
+const float LYING_ANGLE_DEGREES = 60.0;
+const unsigned long IMPACT_WINDOW = 4000;       // prazo total apos impacto
+const unsigned long LYING_CONFIRMATION = 1200; // postura persistente por 1,2s
+const unsigned long MAX_POSTURE_SAMPLE_GAP = 250; // nao contar pausas sem leituras
 
 const unsigned long SENSOR_INTERVAL = 25;
 const unsigned long TELEMETRY_INTERVAL = 1000;
@@ -82,6 +84,10 @@ const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
 Adafruit_MPU6050 mpu;
 bool sensorConnected = false;
 bool calibrationRequested = false;
+String calibrationId = "";
+String calibrationResult = "";
+unsigned long lastCalibrationReport = 0;
+unsigned long calibrationCommandTime = 0;
 uint8_t activeSensorAddress = 0;
 uint8_t activeSensorIdentity = 0;
 
@@ -99,6 +105,7 @@ enum FallState {
 FallState fallState = NORMAL;
 unsigned long suddenMovementTime = 0;
 unsigned long fallConfirmedTime = 0;
+unsigned long lastPostureSample = 0;
 bool fallAlertShown = false;
 
 // Contadores
@@ -270,7 +277,7 @@ bool calibrateSensor() {
   
   float sumAccX = 0, sumAccY = 0, sumAccZ = 0;
   float sumGyroX = 0, sumGyroY = 0, sumGyroZ = 0;
-  const int samples = 50;
+  const int samples = 100; // 1 s de preparo + 100 leituras de 20 ms = cerca de 3 s.
   
   for (int i = 0; i < samples; i++) {
     sensors_event_t a, g;
@@ -507,7 +514,16 @@ bool sendToAPI(const char* url, String jsonPayload, bool checkForReset) {
       ESP.restart(); 
     }
     if (response.indexOf("\"calibrate\": true") >= 0 || response.indexOf("\"calibrate\":true") >= 0) {
-      calibrationRequested = true;
+      int key = response.indexOf("\"calibrationId\"");
+      int colon = key >= 0 ? response.indexOf(':', key) : -1;
+      int start = colon >= 0 ? response.indexOf('"', colon + 1) : -1;
+      int end = start >= 0 ? response.indexOf('"', start + 1) : -1;
+      if (start >= 0 && end > start && end - start == 37) {
+        calibrationId = response.substring(start + 1, end);
+        calibrationRequested = true;
+        calibrationCommandTime = millis();
+        calibrationResult = "";
+      }
     }
   }
   // >>> FIM DA LÓGICA DE RESET <<<
@@ -515,6 +531,14 @@ bool sendToAPI(const char* url, String jsonPayload, bool checkForReset) {
   http.end();
   
   return (httpCode == 200);
+}
+
+bool reportCalibration(String status) {
+  String url = String(API_URL_SENSOR);
+  url = url.substring(0, url.lastIndexOf('/')) + "/calibration";
+  String json = "{\"deviceId\":\"" + deviceId + "\",\"calibrationId\":\"" +
+                calibrationId + "\",\"status\":\"" + status + "\"}";
+  return sendToAPI(url.c_str(), json, false);
 }
 
 void sendCheckpoint(int checkpoint, String timestamp) {
@@ -582,10 +606,11 @@ String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g,
   // Máquina de estados de detecção de queda
   switch (fallState) {
     case NORMAL:
-      // Detectar movimento súbito (rotação brusca OU impacto forte)
-      if (gyroDegPerSec > ROTATION_THRESHOLD || accMagnitude > IMPACT_THRESHOLD) {
+      // Rotacao isolada e mudanca do vetor de gravidade nao sao impactos.
+      if (totalAcc > IMPACT_THRESHOLD) {
         fallState = SUDDEN_MOVEMENT_DETECTED;
         suddenMovementTime = currentTime;
+        lastPostureSample = currentTime;
         fallConfirmedTime = 0;
         fallAlertShown = false;
         Serial.println("\n⚠️  MOVIMENTO SÚBITO DETECTADO!");
@@ -599,40 +624,40 @@ String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g,
         return "PARADO";
       }
       
-    case SUDDEN_MOVEMENT_DETECTED:
-      // Verificar se está em posição deitada
-      if (isLyingPosition(a.acceleration.x, a.acceleration.y, a.acceleration.z)) {
-        if (fallConfirmedTime == 0) {
-          fallConfirmedTime = currentTime;
-        }
-        
-        // Confirma rapidamente quando a posição deitada permanece estável.
-        if (currentTime - fallConfirmedTime >= LYING_CONFIRMATION) {
-          fallState = FALL_CONFIRMED;
-          if (!fallAlertShown) {
-            Serial.println("\n╔════════════════════════════════╗");
-            Serial.println("║  * QUEDA CONFIRMADA * ║");
-            Serial.println("║  PESSOA CAIDA - ATENÇÃO!       ║");
-            Serial.println("╚════════════════════════════════╝");
-            Serial.printf("Tempo deitado: %lu ms\n\n", currentTime - fallConfirmedTime);
-            fallAlertShown = true;
-          }
-          return "QUEDA CONFIRMADA";
-        }
-      } else {
+    case SUDDEN_MOVEMENT_DETECTED: {
+      // Expirar mesmo se continuar inclinado ou girando.
+      if (currentTime - suddenMovementTime >= IMPACT_WINDOW) {
+        fallState = NORMAL;
         fallConfirmedTime = 0;
+        fallAlertShown = false;
+        return (accMagnitude > 2.0 || gyroDegPerSec > 20)
+                   ? "EM MOVIMENTO" : "PARADO";
+      }
 
-        if (currentTime - suddenMovementTime >= IMPACT_WINDOW) {
-          fallState = NORMAL;
-          fallAlertShown = false;
-          Serial.println("Movimento brusco sem queda - retornando ao normal");
-          return (accMagnitude > 2.0 || gyroDegPerSec > 20)
-                     ? "EM MOVIMENTO"
-                     : "PARADO";
-        }
+      if (currentTime - lastPostureSample > MAX_POSTURE_SAMPLE_GAP) {
+        fallConfirmedTime = 0;
+      }
+      lastPostureSample = currentTime;
+
+      // Acelerometro estima postura apenas quando predomina a gravidade.
+      const bool stablePosture =
+          abs(totalAcc - SENSORS_GRAVITY_STANDARD) <= POSTURE_GRAVITY_TOLERANCE &&
+          gyroDegPerSec <= POSTURE_MAX_ROTATION &&
+          isLyingPosition(a.acceleration.x, a.acceleration.y, a.acceleration.z);
+      if (!stablePosture) {
+        fallConfirmedTime = 0;
+        break;
+      }
+      if (fallConfirmedTime == 0) fallConfirmedTime = currentTime;
+      if (currentTime - fallConfirmedTime >= LYING_CONFIRMATION) {
+        fallState = FALL_CONFIRMED;
+        fallAlertShown = true;
+        Serial.println("QUEDA CONFIRMADA: impacto seguido de inclinacao persistente.");
+        return "QUEDA CONFIRMADA";
       }
       break;
-      
+    }
+
     case FALL_CONFIRMED:
       // Mantém a queda latente até o painel devolver acknowledgeFall=true.
       // Assim uma oscilação momentânea do WiFi não perde o pop-up.
@@ -702,18 +727,33 @@ void setup() {
 void loop() {
   maintainWiFi();
 
-  if (calibrationRequested) {
+  if (millis() - calibrationCommandTime > 30000) {
     calibrationRequested = false;
-    sensorConnected = calibrateSensor();
-    // Preservar queda já confirmada até o atendimento pelo painel.
-    if (sensorConnected && fallState != FALL_CONFIRMED) {
-      fallState = NORMAL;
-      suddenMovementTime = 0;
-      fallConfirmedTime = 0;
-      fallAlertShown = false;
+    calibrationResult = "";
+  }
+
+  if (calibrationRequested && millis() - lastCalibrationReport >= 1000) {
+    lastCalibrationReport = millis();
+    if (reportCalibration("running")) {
+      calibrationRequested = false;
+      sensorConnected = calibrateSensor();
+      calibrationResult = sensorConnected ? "completed" : "failed";
+      // Preservar queda já confirmada até o atendimento pelo painel.
+      if (sensorConnected && fallState != FALL_CONFIRMED) {
+        fallState = NORMAL;
+        suddenMovementTime = 0;
+        fallConfirmedTime = 0;
+        fallAlertShown = false;
+      }
+      lastStatus = "";
+      lastSensorInitAttempt = millis();
     }
-    lastStatus = "";
-    lastSensorInitAttempt = millis();
+  }
+
+  // Reportar inclusive falhas de sensor; tentar novamente se o Wi-Fi oscilar.
+  if (calibrationResult.length() && millis() - lastCalibrationReport >= 1000) {
+    lastCalibrationReport = millis();
+    if (reportCalibration(calibrationResult)) calibrationResult = "";
   }
 
   if (!sensorConnected) {

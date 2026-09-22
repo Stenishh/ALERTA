@@ -181,6 +181,18 @@ def falls_this_month(device):
     )
 
 
+def public_calibration(device):
+    calibration = device.get("calibration")
+    if not calibration:
+        return None
+    result = dict(calibration)
+    if result["status"] in ("pending", "running"):
+        age = (utc_now() - datetime.fromisoformat(result["requestedAt"])).total_seconds()
+        if age > 30:
+            result["status"] = "timeout"
+    return result
+
+
 def public_device(device):
     return {
         "id": device["id"],
@@ -193,6 +205,7 @@ def public_device(device):
         "chipId": device.get("chipId") or None,
         "battery": device.get("battery"),
         "batteryVoltage": device.get("batteryVoltage"),
+        "calibration": public_calibration(device),
         "wifiSignal": device.get("wifiSignal"),
         "bedId": device.get("bedId") or None,
         "lastUpdate": device.get("lastSeen"),
@@ -412,10 +425,45 @@ def schedule_device_calibration(patient_id):
             return error_response("Dispositivo não encontrado.", 404)
         if effective_status(device) == "offline":
             return error_response("Conecte o dispositivo antes de calibrar.", 409)
+        previous = public_calibration(device)
+        if previous and previous["status"] in ("pending", "running"):
+            return error_response("Já existe uma calibração em andamento.", 409)
+        device["calibration"] = {
+            "id": str(uuid4()), "status": "pending", "durationMs": 3000,
+            "requestedAt": iso_now(), "startedAt": None,
+        }
         device["calibrationPending"] = True
         add_log("COMANDO", "Calibração solicitada para a placa.", device["deviceId"])
         save_state()
-        return jsonify({"status": "success", "message": "Calibração agendada"}), 200
+        return jsonify(device["calibration"]), 200
+
+
+@app.route("/api/calibration", methods=["POST"])
+def report_calibration():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or data.get("status") not in ("running", "completed", "failed"):
+        return error_response("Resultado de calibração inválido.")
+    with state_lock:
+        device = state["devices"].get(normalize_device_id(data.get("deviceId")))
+        calibration = public_calibration(device) if device else None
+        if not calibration or calibration["id"] != data.get("calibrationId"):
+            return error_response("Calibração não encontrada.", 404)
+        # Repetir uma confirmação é seguro; resultados atrasados não mudam outra solicitação.
+        if calibration["status"] == data["status"]:
+            return jsonify(calibration), 200
+        if calibration["status"] not in ("pending", "running"):
+            return error_response("Calibração já encerrada.", 409)
+        if data["status"] == "completed" and calibration["status"] != "running":
+            return error_response("Calibração ainda não iniciada.", 409)
+        calibration["status"] = data["status"]
+        if data["status"] == "running":
+            calibration["startedAt"] = iso_now()
+        else:
+            calibration["finishedAt"] = iso_now()
+        device["calibration"] = calibration
+        device["calibrationPending"] = False
+        save_state()
+        return jsonify(calibration), 200
 
 
 @app.route("/api/devices/<patient_id>/reset", methods=["POST"])
@@ -550,7 +598,11 @@ def sensor_data():
             device["statusSince"] = iso_now()
 
         reset_requested = bool(device.get("resetPending"))
-        calibration_requested = bool(device.get("calibrationPending")) and not reset_requested
+        calibration = public_calibration(device)
+        calibration_requested = bool(device.get("calibrationPending")) and not reset_requested and bool(calibration and calibration["status"] == "pending")
+        calibration_id = calibration["id"] if calibration_requested else None
+        if reset_requested and calibration and calibration["status"] in ("pending", "running"):
+            device["calibration"]["status"] = "failed"
         if calibration_requested or reset_requested:
             # Reiniciar já executa a calibração na inicialização.
             device["calibrationPending"] = False
@@ -569,6 +621,7 @@ def sensor_data():
             "status": "success",
             "reset": reset_requested,
             "calibrate": calibration_requested,
+            "calibrationId": calibration_id,
             "acknowledgeFall": fall_acknowledged,
         }
     ), 200

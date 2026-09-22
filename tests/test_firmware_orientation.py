@@ -19,6 +19,7 @@ class FirmwareOrientationTest(unittest.TestCase):
 #include <string>
 using std::abs;
 using String = std::string;
+constexpr float SENSORS_GRAVITY_STANDARD = 9.80665f;
 constexpr float DEG_TO_RAD = 0.017453292519943295f;
 template<class T> T constrain(T value, T low, T high) {
   return std::max(low, std::min(high, value));
@@ -52,23 +53,73 @@ int main() {
       assert(!isLyingPosition(slight.x,slight.y,slight.z));
       sensors_event_t a{}, g{};
       float acc, gyro;
-      fallState=NORMAL; clockMs=100; a.acceleration=up;
-      assert(analyzeFallDetection(a,g,acc,gyro)=="PARADO");
+      auto reset = [&]() {
+        fallState=NORMAL; fallConfirmedTime=0; clockMs=100;
+        a.acceleration=up; g.gyro={0,0,0};
+      };
+      auto sample = [&]() {
+        clockMs += 25;
+        return analyzeFallDetection(a,g,acc,gyro);
+      };
+      auto noFallFor = [&](int milliseconds) {
+        for (int elapsed=0; elapsed<milliseconds; elapsed+=25)
+          assert(sample() != "QUEDA CONFIRMADA");
+      };
+      auto impact = [&]() {
+        a.acceleration={up.x*2.5f,up.y*2.5f,up.z*2.5f};
+        assert(sample()=="ANALISANDO MOVIMENTO");
+      };
+      reset();
+      assert(sample()=="PARADO");
+      // Giro rapido seguido de inclinacao, sem impacto: nao e queda.
       g.gyro.x=4;
-      assert(analyzeFallDetection(a,g,acc,gyro)=="ANALISANDO MOVIMENTO");
-      g.gyro.x=0; a.acceleration=down; clockMs=125;
-      analyzeFallDetection(a,g,acc,gyro);
-      clockMs=424;
-      assert(analyzeFallDetection(a,g,acc,gyro)!="QUEDA CONFIRMADA");
-      clockMs=425;
-      assert(analyzeFallDetection(a,g,acc,gyro)=="QUEDA CONFIRMADA");
+      noFallFor(300);
+      a.acceleration=down;
+      noFallFor(300);
+      g.gyro.x=0;
+      noFallFor(5000);
+      assert(fallState==NORMAL);
+
+      // Impacto seguido de postura inclinada estavel confirma, em qualquer montagem.
+      reset(); impact(); a.acceleration=down;
+      noFallFor(1200);
+      assert(sample()=="QUEDA CONFIRMADA");
       a.acceleration=up;
-      assert(analyzeFallDetection(a,g,acc,gyro)=="QUEDA CONFIRMADA");
-      // Rotacao brusca seguida de retorno em pe nao confirma queda.
-      fallState=NORMAL; clockMs=1000; g.gyro.x=4;
-      analyzeFallDetection(a,g,acc,gyro);
-      g.gyro.x=0; clockMs=1500;
-      assert(analyzeFallDetection(a,g,acc,gyro)=="PARADO");
+      assert(sample()=="QUEDA CONFIRMADA");
+
+      // Impacto, inclinacao breve e retorno em pe.
+      reset(); impact(); a.acceleration=down;
+      noFallFor(600); a.acceleration=up;
+      noFallFor(4500); assert(fallState==NORMAL);
+
+      // Inclinacao sem impacto tambem nao pode disparar pelo vetor de gravidade.
+      reset(); a.acceleration=down;
+      noFallFor(5000); assert(fallState==NORMAL);
+
+      // Mesmo apos impacto, rotacao continua nao confirma; a janela expira.
+      reset(); impact(); a.acceleration=down; g.gyro.x=4;
+      noFallFor(4500); g.gyro.x=0;
+      noFallFor(2000); assert(fallState==NORMAL);
+
+      // Aceleracao dinamica lateral nao pode ser usada como postura estavel.
+      reset(); impact();
+      a.acceleration={down.x*1.5f,down.y*1.5f,down.z*1.5f};
+      noFallFor(4500); assert(fallState==NORMAL);
+
+      // Uma interrupcao de leitura nao conta como tempo de postura confirmada.
+      reset(); impact(); a.acceleration=down;
+      noFallFor(600); clockMs+=1000;
+      noFallFor(1200); assert(sample()=="QUEDA CONFIRMADA");
+
+      // Movimento durante a confirmacao reinicia a contagem.
+      reset(); impact(); a.acceleration=down; noFallFor(600);
+      g.gyro.x=4; noFallFor(100); g.gyro.x=0;
+      noFallFor(1200); assert(sample()=="QUEDA CONFIRMADA");
+
+      // Sem novas leituras antes do prazo final: nunca confirmar por tempo decorrido.
+      reset(); impact(); a.acceleration=down; sample(); clockMs+=4500;
+      assert(sample()!="QUEDA CONFIRMADA"); assert(fallState==NORMAL);
+
     }
   }
   refAccX=refAccY=refAccZ=0;

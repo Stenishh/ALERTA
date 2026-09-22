@@ -1,3 +1,4 @@
+import { BatteryIndicator } from "@/components/BatteryIndicator";
 import Link from "next/link";
 import Image from "next/image";
 import { ChevronRight } from "lucide-react";
@@ -71,7 +72,6 @@ function Avatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
 export function PatientCard({ patient }: PatientCardProps) {
   const status = statusConfig[patient.status];
   const risk = riskConfig[patient.riskLevel];
-  const isBatteryCritical = patient.battery !== null && patient.battery < 20;
 
   return (
     <div
@@ -120,14 +120,7 @@ export function PatientCard({ patient }: PatientCardProps) {
         style={{ borderColor: "var(--border)" }}
       >
         <div className="flex items-center gap-3">
-          <span
-            className={`text-xs font-semibold flex items-center gap-1 ${
-              isBatteryCritical ? "text-red-500" : ""
-            }`}
-            style={!isBatteryCritical ? { color: "var(--text-secondary)" } : {}}
-          >
-            🔋 {patient.battery === null ? "--" : `${Math.round(patient.battery)}%`}
-          </span>
+          <BatteryIndicator patient={patient} compact />
           <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
             📶 {patient.wifiSignal === null || patient.wifiSignal === undefined ? "--" : `${Math.round(patient.wifiSignal)} dBm`}
           </span>

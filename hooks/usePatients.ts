@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import type { DashboardMetrics, Patient } from "@/types";
 
+const TELEMETRY_POLL_INTERVAL = 1000;
+
 interface UsePatientsReturn {
   patients: Patient[];
   metrics: DashboardMetrics;
@@ -43,7 +45,7 @@ export function usePatients(): UsePatientsReturn {
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 2000);
+    const interval = window.setInterval(() => void refresh(), TELEMETRY_POLL_INTERVAL);
     return () => window.clearInterval(interval);
   }, [refresh]);
 
@@ -83,7 +85,7 @@ export function usePatient(id: string): UsePatientReturn {
 
   useEffect(() => {
     void refresh();
-    const interval = window.setInterval(() => void refresh(), 2000);
+    const interval = window.setInterval(() => void refresh(), TELEMETRY_POLL_INTERVAL);
     return () => window.clearInterval(interval);
   }, [refresh]);
 

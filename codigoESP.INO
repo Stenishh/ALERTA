@@ -3,7 +3,7 @@
  * SISTEMA DE DETECÇÃO DE RISCO DE QUEDA
  * ========================================
  * * Desenvolvido para ESP32-C3
- * Sensor: MPU6050 (Acelerômetro + Giroscópio)
+ * Sensor: MPU6050 / MPU6515 (Acelerômetro + Giroscópio)
  * Comunicação: WiFi + API REST
  * * Funcionalidades:
  * - Calibração automática do sensor
@@ -13,7 +13,7 @@
  * - Alertas em tempo real
  * * Autor: Fernando Stein
  * Data: Janeiro 2026
- * Versão do firmware: 2.0
+ * Versão do firmware: 2.3
  */
 
 // ==========================================
@@ -24,9 +24,11 @@
 #include <Adafruit_Sensor.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
+#include <esp_arduino_version.h>
+#include <esp_system.h>
 #include "time.h"
 
-const char* FIRMWARE_VERSION = "2.0";
+const char* FIRMWARE_VERSION = "2.3";
 
 // ==========================================
 // CONFIGURAÇÕES - EDITE AQUI!
@@ -35,6 +37,8 @@ const char* FIRMWARE_VERSION = "2.0";
 // --- WiFi ---
 const char* WIFI_SSID = "FernandoRede";
 const char* WIFI_PASSWORD = "urubu123";
+// Perfil de diagnostico para a SuperMini; potencia menor pode reduzir o alcance.
+const wifi_power_t WIFI_TX_POWER = WIFI_POWER_8_5dBm;
 
 // --- API (coloque o IP do seu PC) ---
 const char* API_URL_CHECKPOINT =
@@ -61,13 +65,14 @@ const float BATTERY_MAX_VOLTAGE = 4.20;
 // --- Limiares de Detecção de Queda ---
 const float IMPACT_THRESHOLD = 12.0;            // m/s² - Impacto forte
 const float ROTATION_THRESHOLD = 150.0;         // °/s - Rotação brusca
-const float LYING_POSITION_THRESHOLD = 7.0;     // m/s² - Posição deitada
+// Angulo relativo a postura em pe calibrada: independe do eixo da montagem.
+const float LYING_ANGLE_DEGREES = 45.0;
 const unsigned long IMPACT_WINDOW = 500;        // no máximo 0,5s analisando
 const unsigned long LYING_CONFIRMATION = 300;   // confirma a queda em 0,3s
 
 const unsigned long SENSOR_INTERVAL = 25;
 const unsigned long TELEMETRY_INTERVAL = 1000;
-const unsigned long WIFI_RECONNECT_INTERVAL = 10000;
+const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
 
 // ==========================================
 // VARIÁVEIS GLOBAIS
@@ -76,6 +81,9 @@ const unsigned long WIFI_RECONNECT_INTERVAL = 10000;
 // Sensor
 Adafruit_MPU6050 mpu;
 bool sensorConnected = false;
+bool calibrationRequested = false;
+uint8_t activeSensorAddress = 0;
+uint8_t activeSensorIdentity = 0;
 
 // Calibração
 float refAccX = 0, refAccY = 0, refAccZ = 0;
@@ -100,6 +108,8 @@ String deviceId = "";
 unsigned long lastSensorRead = 0;
 unsigned long lastTelemetrySend = 0;
 unsigned long lastWiFiReconnectAttempt = 0;
+unsigned long lastSensorInitAttempt = 0;
+const unsigned long SENSOR_RETRY_INTERVAL = 10000;
 
 // ==========================================
 // FUNÇÕES - BATERIA
@@ -128,26 +138,133 @@ int readBatteryPercentage(float voltage) {
 // FUNÇÕES - SENSOR MPU6050
 // ==========================================
 
-bool initSensor() {
-  Wire.begin(SDA_PIN, SCL_PIN);
-  
-  if (!mpu.begin()) {
-    Serial.println("❌ ERRO: MPU6050 não encontrado!");
-    return false;
-  }
-  
-  // Configurar ranges
-  mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
-  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
-  mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
-  
-  Serial.println("✅ MPU6050 inicializado!");
+// MPU6515: WHO_AM_I=0x74, registradores de movimento compativeis com MPU6500.
+// Fonte: driver InvenSense inv_mpu6515 do kernel Android.
+bool readSensorRegisters(uint8_t reg, uint8_t* data, uint8_t count) {
+  Wire.beginTransmission(activeSensorAddress);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(activeSensorAddress, count) != count) return false;
+  for (uint8_t i = 0; i < count; ++i) data[i] = Wire.read();
   return true;
 }
 
-void calibrateSensor() {
+bool writeSensorRegister(uint8_t reg, uint8_t value) {
+  Wire.beginTransmission(activeSensorAddress);
+  Wire.write(reg);
+  Wire.write(value);
+  return Wire.endTransmission() == 0;
+}
+
+bool configureMPU6515() {
+  if (!writeSensorRegister(0x6B, 0x80)) return false; // Reset
+  delay(100);
+  if (!writeSensorRegister(0x6B, 0x01)) return false; // PLL, acordado
+  delay(100);
+  // Eixos ativos, 100 Hz, filtro gyro ~20 Hz, +/-500 graus/s, +/-8 g.
+  const uint8_t registers[] = {0x6C, 0x19, 0x1A, 0x1B, 0x1C, 0x1D};
+  const uint8_t values[] =    {0x00, 0x09, 0x04, 0x08, 0x10, 0x04};
+  for (unsigned int i = 0; i < sizeof(registers); ++i) {
+    uint8_t actual = 0;
+    if (!writeSensorRegister(registers[i], values[i]) ||
+        !readSensorRegisters(registers[i], &actual, 1) || actual != values[i]) {
+      Serial.printf("[I2C] Falha ao configurar/verificar registro 0x%02X\n", registers[i]);
+      return false;
+    }
+  }
+  uint8_t identity = 0;
+  if (!readSensorRegisters(0x75, &identity, 1) || identity != 0x74) return false;
+  delay(100);
+  return true;
+}
+
+bool readMotion(sensors_event_t& a, sensors_event_t& g) {
+  uint8_t bytes[14];
+  if (!readSensorRegisters(0x3B, bytes, sizeof(bytes))) return false;
+  auto signedWord = [&](int offset) -> int16_t {
+    return (int16_t)((uint16_t(bytes[offset]) << 8) | bytes[offset + 1]);
+  };
+  a = {};
+  g = {};
+  // Ambos configurados em +/-8 g (4096 LSB/g) e +/-500 graus/s (65,5 LSB/(grau/s)).
+  const float accelScale = SENSORS_GRAVITY_STANDARD / 4096.0f;
+  const float gyroScale = DEG_TO_RAD / 65.5f;
+  a.acceleration.x = signedWord(0) * accelScale;
+  a.acceleration.y = signedWord(2) * accelScale;
+  a.acceleration.z = signedWord(4) * accelScale;
+  g.gyro.x = signedWord(8) * gyroScale;
+  g.gyro.y = signedWord(10) * gyroScale;
+  g.gyro.z = signedWord(12) * gyroScale;
+  return true;
+}
+
+bool initSensor() {
+  lastSensorInitAttempt = millis();
+  Wire.end();
+  if (!Wire.begin(SDA_PIN, SCL_PIN, 100000)) {
+    Serial.println("[I2C] Falha ao iniciar o barramento.");
+    return false;
+  }
+  Wire.setTimeOut(50);
+  Serial.printf("[I2C] SDA=GPIO %d, SCL=GPIO %d, clock=100 kHz\n", SDA_PIN, SCL_PIN);
+  unsigned int found = 0;
+  unsigned int errors = 0;
+  uint8_t sensorAddress = 0;
+  for (uint8_t address = 1; address < 127; ++address) {
+    Wire.beginTransmission(address);
+    const uint8_t result = Wire.endTransmission();
+    if (result == 0) {
+      ++found;
+      Serial.printf("[I2C] Dispositivo respondeu em 0x%02X\n", address);
+      if (address == 0x68 || address == 0x69) {
+        Wire.beginTransmission(address);
+        Wire.write(0x75);  // WHO_AM_I do MPU6050
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom(address, (uint8_t)1) == 1) {
+          const int identity = Wire.read();
+          Serial.printf("[I2C] 0x%02X WHO_AM_I=0x%02X (suportados: MPU6050=0x68, MPU6515=0x74)\n", address, identity);
+          if ((identity == 0x68 || identity == 0x74) && sensorAddress == 0) {
+            sensorAddress = address;
+            activeSensorIdentity = identity;
+          }
+        } else {
+          Serial.println("[I2C] Falha ao ler a identificacao do sensor.");
+        }
+      }
+    } else if (result != 2) {
+      ++errors;  // NACK de endereco (2) e normal para enderecos vazios.
+    }
+  }
+  Serial.printf("[I2C] Resumo: %u dispositivo(s), %u erro(s) de barramento\n", found, errors);
+  if (!sensorAddress) {
+    Serial.println("[I2C] Nenhum MPU6050/MPU6515 identificado. Conferir alimentacao, GND, SDA/SCL e modelo do sensor.");
+    return false;
+  }
+  activeSensorAddress = sensorAddress;
+  for (int attempt = 0; attempt < 5; ++attempt) {
+    uint8_t identity = 0;
+    if (!readSensorRegisters(0x75, &identity, 1) || identity != activeSensorIdentity) {
+      Serial.println("[I2C] Identificacao instavel; inicializacao interrompida.");
+      return false;
+    }
+    Serial.printf("[I2C] Confirmacao ID %d/5: 0x%02X\n", attempt + 1, identity);
+    delay(20);
+  }
+  if (activeSensorIdentity == 0x74) {
+    Serial.println("[I2C] ID 0x74 confirmado; usando perfil compativel com MPU6515.");
+    if (!configureMPU6515()) return false;
+  } else {
+    if (!mpu.begin(sensorAddress, &Wire)) return false;
+    mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
+    mpu.setGyroRange(MPU6050_RANGE_500_DEG);
+    mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
+  }
+  Serial.println("[I2C] Sensor inicializado; verificando leituras na calibracao.");
+  return true;
+}
+
+bool calibrateSensor() {
   Serial.println("\n🔧 Calibrando sensor...");
-  Serial.println("⚠️  Mantenha o sensor PARADO durante 3 segundos!");
+  Serial.println("⚠️  Fixe o sensor no colete ou cinto. Fique EM PE e PARADO durante a calibracao!");
   
   delay(1000);
   
@@ -156,8 +273,11 @@ void calibrateSensor() {
   const int samples = 50;
   
   for (int i = 0; i < samples; i++) {
-    sensors_event_t a, g, temp;
-    mpu.getEvent(&a, &g, &temp);
+    sensors_event_t a, g;
+    if (!readMotion(a, g)) {
+      Serial.println("[I2C] Leitura incompleta na calibracao; sensor nao liberado.");
+      return false;
+    }
     
     sumAccX += a.acceleration.x;
     sumAccY += a.acceleration.y;
@@ -179,14 +299,23 @@ void calibrateSensor() {
   
   Serial.println("\n✅ Calibração concluída!");
   Serial.printf("   Referências: AccX=%.2f AccY=%.2f AccZ=%.2f\n", refAccX, refAccY, refAccZ);
+  return true;
 }
 
 float getTotalAcceleration(float x, float y, float z) {
   return sqrt(x*x + y*y + z*z);
 }
 
-bool isLyingPosition(float accZ) {
-  return abs(accZ) < LYING_POSITION_THRESHOLD;
+bool isLyingPosition(float accX, float accY, float accZ) {
+  const float referenceMagnitude = getTotalAcceleration(refAccX, refAccY, refAccZ);
+  const float currentMagnitude = getTotalAcceleration(accX, accY, accZ);
+  // Sem vetor de gravidade utilizavel, nao inferir postura (ex.: queda livre).
+  if (referenceMagnitude < 1.0f || currentMagnitude < 1.0f) return false;
+  const float cosine = constrain(
+      (accX * refAccX + accY * refAccY + accZ * refAccZ) /
+          (referenceMagnitude * currentMagnitude),
+      -1.0f, 1.0f);
+  return cosine < cos(LYING_ANGLE_DEGREES * DEG_TO_RAD);
 }
 
 // ==========================================
@@ -195,9 +324,35 @@ bool isLyingPosition(float accZ) {
 
 void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
   if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
-    Serial.printf("\n   Motivo do driver WiFi: %d\n",
-                  info.wifi_sta_disconnected.reason);
+    const uint8_t reason = info.wifi_sta_disconnected.reason;
+    Serial.printf("\n[WiFi %lu ms] Desconectado: %u (%s)\n", millis(),
+                  reason, WiFi.STA.disconnectReasonName((wifi_err_reason_t)reason));
+  } else if (event == ARDUINO_EVENT_WIFI_STA_CONNECTED) {
+    Serial.println("\n[WiFi] Associado ao ponto de acesso; aguardando IP (DHCP).");
+  } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.printf("\n[WiFi] IP recebido: %s | sinal: %d dBm | canal: %d\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI(), WiFi.channel());
   }
+}
+
+void scanWiFiDiagnostic() {
+  Serial.println("[WiFi] Procurando redes de 2,4 GHz antes de conectar...");
+  const int count = WiFi.scanNetworks(false, true);
+  if (count < 0) {
+    Serial.printf("[WiFi] Falha na varredura: %d\n", count);
+  } else {
+    Serial.printf("[WiFi] Redes encontradas: %d\n", count);
+    bool found = false;
+    for (int i = 0; i < count; ++i) {
+      if (WiFi.SSID(i) != WIFI_SSID) continue;
+      found = true;
+      Serial.printf("[WiFi] Rede alvo: %s | sinal: %d dBm | canal: %d | seguranca: %d\n",
+                    WIFI_SSID, WiFi.RSSI(i), WiFi.channel(i),
+                    (int)WiFi.encryptionType(i));
+    }
+    if (!found) Serial.println("[WiFi] Rede alvo NAO encontrada nesta varredura.");
+  }
+  WiFi.scanDelete();
 }
 
 const char* wifiStatusText(wl_status_t status) {
@@ -218,10 +373,15 @@ void connectWiFi() {
 
   WiFi.onEvent(onWiFiEvent);
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(true);
-  WiFi.setAutoReconnect(true);
+  if (!WiFi.setSleep(false)) Serial.println("[WiFi] Falha ao desativar economia de energia.");
+  // O loop controla as tentativas para nao disputar com a reconexao automatica.
+  WiFi.setAutoReconnect(false);
   delay(300);
+  if (!WiFi.setTxPower(WIFI_TX_POWER)) Serial.println("[WiFi] Falha ao ajustar potencia TX.");
+  Serial.printf("[WiFi] Potencia TX configurada: %.2f dBm\n", (int)WiFi.getTxPower() / 4.0);
+  scanWiFiDiagnostic();
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  lastWiFiReconnectAttempt = millis();
 
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < 60) {
@@ -238,7 +398,7 @@ void connectWiFi() {
     Serial.println("\n❌ Falha ao conectar WiFi");
     wl_status_t status = WiFi.status();
     Serial.printf("   Codigo: %d (%s)\n", status, wifiStatusText(status));
-    Serial.println("   Continuando sem conexão...");
+    Serial.println("   Continuando sem conexao. Nova tentativa controlada pelo loop.");
   }
 }
 
@@ -250,7 +410,16 @@ void maintainWiFi() {
 
   lastWiFiReconnectAttempt = now;
   Serial.println("\n📡 WiFi desconectado. Nova tentativa em segundo plano...");
-  WiFi.reconnect();
+  // WL_CONNECTED so chega depois do IP. Pode haver uma conexao em andamento
+  // mesmo sem esse status: encerre-a antes de solicitar outra ao driver.
+  if (!WiFi.disconnect(false, false)) {
+    Serial.println("   Nao foi possivel encerrar a tentativa anterior.");
+    return;
+  }
+  delay(100);  // Permite processar o evento de desconexao antes da nova tentativa.
+  if (!WiFi.reconnect()) {
+    Serial.println("   Driver nao iniciou a tentativa. Aguardando novo intervalo.");
+  }
 }
 
 // ==========================================
@@ -337,6 +506,9 @@ bool sendToAPI(const char* url, String jsonPayload, bool checkForReset) {
       delay(1000); 
       ESP.restart(); 
     }
+    if (response.indexOf("\"calibrate\": true") >= 0 || response.indexOf("\"calibrate\":true") >= 0) {
+      calibrationRequested = true;
+    }
   }
   // >>> FIM DA LÓGICA DE RESET <<<
   
@@ -382,7 +554,7 @@ void sendSensorData(float accX, float accY, float accZ,
 }
 
 // ==========================================
-// FUNÇÕES - DETECÇÃO DE QUEDA (SUA LÓGICA ORIGINAL)
+// FUNÇÕES - DETECÇÃO DE QUEDA (COLETE OU CINTO)
 // ==========================================
 
 String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g, 
@@ -429,7 +601,7 @@ String analyzeFallDetection(sensors_event_t &a, sensors_event_t &g,
       
     case SUDDEN_MOVEMENT_DETECTED:
       // Verificar se está em posição deitada
-      if (isLyingPosition(a.acceleration.z)) {
+      if (isLyingPosition(a.acceleration.x, a.acceleration.y, a.acceleration.z)) {
         if (fallConfirmedTime == 0) {
           fallConfirmedTime = currentTime;
         }
@@ -485,6 +657,9 @@ void setup() {
   Serial.println("║  SISTEMA DE DETECÇÃO DE RISCO DE QUEDA ║");
   Serial.println("╚════════════════════════════════════════╝");
   Serial.printf("   Firmware: v%s\n", FIRMWARE_VERSION);
+  Serial.printf("   Compilado: %s %s | Arduino ESP32: %s\n", __DATE__, __TIME__, ESP_ARDUINO_VERSION_STR);
+  Serial.printf("   Chip: %s | revisao: %d | motivo reset: %d\n",
+                ESP.getChipModel(), ESP.getChipRevision(), (int)esp_reset_reason());
   
   // 1. Conectar WiFi
   Serial.println("\n[1/3] Conectando ao WiFi...");
@@ -502,10 +677,9 @@ void setup() {
   }
   
   // 3. Inicializar sensor
-  Serial.println("\n[3/3] Inicializando sensor MPU6050...");
+  Serial.println("\n[3/3] Inicializando sensor MPU6050/MPU6515...");
   if (initSensor()) {
-    sensorConnected = true;
-    calibrateSensor();
+    sensorConnected = calibrateSensor();
   } else {
     Serial.println("❌ ERRO CRÍTICO: Sensor não encontrado!");
     Serial.println("Verifique as conexões:");
@@ -516,7 +690,8 @@ void setup() {
   }
   
   Serial.println("\n╔════════════════════════════════════════╗");
-  Serial.println("║  SISTEMA INICIADO - MONITORANDO...     ║");
+  Serial.println(sensorConnected ? "║  SENSOR PRONTO - MONITORANDO...       ║"
+                                 : "║  SEM SENSOR - DETECCAO INDISPONIVEL   ║");
   Serial.println("╚════════════════════════════════════════╝\n");
 }
 
@@ -527,9 +702,29 @@ void setup() {
 void loop() {
   maintainWiFi();
 
+  if (calibrationRequested) {
+    calibrationRequested = false;
+    sensorConnected = calibrateSensor();
+    // Preservar queda já confirmada até o atendimento pelo painel.
+    if (sensorConnected && fallState != FALL_CONFIRMED) {
+      fallState = NORMAL;
+      suddenMovementTime = 0;
+      fallConfirmedTime = 0;
+      fallAlertShown = false;
+    }
+    lastStatus = "";
+    lastSensorInitAttempt = millis();
+  }
+
   if (!sensorConnected) {
-    Serial.println("⚠️  Sensor desconectado. Aguardando...");
-    delay(5000);
+    if (millis() - lastSensorInitAttempt >= SENSOR_RETRY_INTERVAL) {
+      Serial.println("[I2C] Tentando detectar o sensor novamente...");
+      if (initSensor()) {
+        sensorConnected = calibrateSensor();
+        lastStatus = "";
+      }
+    }
+    delay(1);
     return;
   }
 
@@ -541,8 +736,13 @@ void loop() {
   lastSensorRead = now;
   
   // Ler dados do sensor
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
+  sensors_event_t a, g;
+  if (!readMotion(a, g)) {
+    Serial.println("[I2C] Leitura incompleta. Deteccao suspensa ate recuperar o sensor.");
+    sensorConnected = false;
+    lastSensorInitAttempt = millis();
+    return;
+  }
   
   // Analisar detecção de queda
   float accMagnitude, gyroMagnitude;

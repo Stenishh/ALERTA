@@ -48,6 +48,12 @@ export default function PatientPage() {
     });
   }
 
+  async function calibrateDevice() {
+    await apiFetch(`/api/devices/${encodeURIComponent(id)}/calibrate`, {
+      method: "POST",
+    });
+  }
+
   async function acknowledgeFall() {
     await acknowledgeAlert();
     await refresh();
@@ -93,6 +99,7 @@ export default function PatientPage() {
         onUnlink={unlinkDevice}
         onDelete={deletePatientRecord}
         onReset={resetDevice}
+        onCalibrate={calibrateDevice}
       />
 
       {/* Conteúdo principal — telemetria + prontuário */}

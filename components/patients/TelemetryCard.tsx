@@ -1,4 +1,5 @@
-import { Wifi, Battery, Timer, AlertTriangle } from "lucide-react";
+import { BatteryIndicator } from "@/components/BatteryIndicator";
+import { Wifi, Timer, AlertTriangle } from "lucide-react";
 import type { Patient } from "@/types";
 
 interface TelemetryCardProps {
@@ -74,28 +75,6 @@ function WifiStrength({ signal }: { signal: number | null | undefined }) {
   );
 }
 
-function BatteryLevel({ level }: { level: number | null }) {
-  const isCritical = level !== null && level < 20;
-  const color = isCritical ? "text-red-500" : "text-slate-700";
-
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <Battery
-        size={22}
-        className={isCritical ? "text-red-500" : "text-slate-600"}
-      />
-      <span className={`text-2xl font-black tabular-nums ${color}`}>
-        {level === null ? "--" : `${Math.round(level)}%`}
-      </span>
-      {isCritical && (
-        <span className="text-[10px] text-red-500 font-semibold uppercase tracking-wide">
-          Crítico
-        </span>
-      )}
-    </div>
-  );
-}
-
 export function TelemetryCard({ patient }: TelemetryCardProps) {
   const status = statusConfig[patient.status];
   const totalSeconds = patient.activityDurationSeconds ?? 0;
@@ -149,7 +128,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
           <span className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
             Bateria
           </span>
-          <BatteryLevel level={patient.battery} />
+          <BatteryIndicator patient={patient} />
         </div>
 
         <div className="w-px h-12" style={{ backgroundColor: "var(--border)" }} />

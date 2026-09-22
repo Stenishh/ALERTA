@@ -157,6 +157,26 @@ O exemplo está configurado para uma bateria Li-ion/LiPo de 3,2–4,2 V ligada a
 GPIO 4 por um divisor 100k/100k. Nunca conecte a bateria diretamente a um ADC do
 ESP32.
 
+### Uso como colete ou cinto
+
+O mesmo firmware usa a direção da gravidade na calibração como referência,
+permitindo fixar o sensor em orientações diferentes no colete ou no cinto.
+Prenda o dispositivo firmemente e mantenha a pessoa em pé e parada durante a
+calibração ao iniciar. Ao mudar a posição de montagem, reinicie o dispositivo
+nessa postura para calibrar novamente.
+
+Na ficha do paciente, **Calibrar sensor** permite solicitar uma nova calibração
+sem reiniciar. Confirme as instruções no pop-up com a pessoa já em pé e parada.
+O dispositivo precisa estar online e com o firmware atualizado para receber o
+comando. A mensagem de solicitação indica o agendamento, não a conclusão física.
+**Reiniciar dispositivo** também abre uma confirmação antes de enviar o comando.
+
+Após um movimento súbito, a lógica verifica uma inclinação maior que 45° em
+relação à referência durante 300 ms. Esses limiares são os parâmetros do
+protótipo; a mudança de montagem ainda precisa ser validada fisicamente em
+ambos os locais. O teste de orientação pode ser executado com
+`python3 -m unittest discover -s tests -v` (requer `clang++`).
+
 ### Contrato principal da API
 
 | Método | Endpoint | Consumidor |
@@ -168,6 +188,7 @@ ESP32.
 | `GET` | `/api/alerts?status=pending` | Dashboard consulta quedas abertas |
 | `PATCH` | `/api/alerts/:id` | Dashboard atende ou descarta uma queda |
 | `POST` | `/api/devices/:id/reset` | Agenda reset remoto do ESP32 |
+| `POST` | `/api/devices/:id/calibrate` | Agenda calibração remota do sensor |
 
 ### Validação
 

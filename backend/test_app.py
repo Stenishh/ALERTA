@@ -92,6 +92,32 @@ class AlertApiTest(unittest.TestCase):
             self.client.get("/api/alerts?status=pending").get_json(), []
         )
 
+    def test_calibration_requires_online_device_and_is_delivered_once(self):
+        patient = self.register_device()
+        url = f"/api/devices/{patient['id']}/calibrate"
+        self.assertEqual(self.client.post(url).status_code, 409)
+        payload = {"deviceId": patient["deviceId"], "status": "PARADO"}
+        self.client.post("/api/sensor", json=payload)
+        self.assertEqual(self.client.post(url).status_code, 200)
+        first = self.client.post("/api/sensor", json=payload).get_json()
+        second = self.client.post("/api/sensor", json=payload).get_json()
+        self.assertTrue(first["calibrate"])
+        self.assertFalse(first["reset"])
+        self.assertFalse(second["calibrate"])
+        self.assertEqual(self.client.post("/api/devices/missing/calibrate").status_code, 404)
+
+    def test_reset_supersedes_pending_calibration(self):
+        patient = self.register_device()
+        payload = {"deviceId": patient["deviceId"], "status": "PARADO"}
+        self.client.post("/api/sensor", json=payload)
+        self.client.post(f"/api/devices/{patient['id']}/calibrate")
+        self.client.post(f"/api/devices/{patient['id']}/reset")
+        first = self.client.post("/api/sensor", json=payload).get_json()
+        second = self.client.post("/api/sensor", json=payload).get_json()
+        self.assertTrue(first["reset"])
+        self.assertFalse(first["calibrate"])
+        self.assertFalse(second["calibrate"])
+
     def test_reset_is_delivered_in_next_sensor_response(self):
         patient = self.register_device()
         scheduled = self.client.post(f"/api/devices/{patient['id']}/reset")

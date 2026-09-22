@@ -139,6 +139,7 @@ def new_device(device_id):
         "fallEventActive": False,
         "fallAcknowledgePending": False,
         "resetPending": False,
+        "calibrationPending": False,
     }
 
 
@@ -403,6 +404,20 @@ def update_alert(alert_id):
         return jsonify(alert), 200
 
 
+@app.route("/api/devices/<patient_id>/calibrate", methods=["POST"])
+def schedule_device_calibration(patient_id):
+    with state_lock:
+        device = get_device_by_patient_id(patient_id)
+        if not device:
+            return error_response("Dispositivo não encontrado.", 404)
+        if effective_status(device) == "offline":
+            return error_response("Conecte o dispositivo antes de calibrar.", 409)
+        device["calibrationPending"] = True
+        add_log("COMANDO", "Calibração solicitada para a placa.", device["deviceId"])
+        save_state()
+        return jsonify({"status": "success", "message": "Calibração agendada"}), 200
+
+
 @app.route("/api/devices/<patient_id>/reset", methods=["POST"])
 def schedule_device_reset(patient_id):
     with state_lock:
@@ -535,6 +550,10 @@ def sensor_data():
             device["statusSince"] = iso_now()
 
         reset_requested = bool(device.get("resetPending"))
+        calibration_requested = bool(device.get("calibrationPending")) and not reset_requested
+        if calibration_requested or reset_requested:
+            # Reiniciar já executa a calibração na inicialização.
+            device["calibrationPending"] = False
         if reset_requested:
             device["resetPending"] = False
 
@@ -549,6 +568,7 @@ def sensor_data():
         {
             "status": "success",
             "reset": reset_requested,
+            "calibrate": calibration_requested,
             "acknowledgeFall": fall_acknowledged,
         }
     ), 200

@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "iniciar": "node scripts/iniciar.mjs",
+    "parar": "node scripts/parar.mjs",
+    "portas": "node scripts/portas.mjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

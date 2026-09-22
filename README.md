@@ -72,6 +72,51 @@ codigoESP.INO        Firmware do ESP32 + MPU6050
 
 ## 🚧 Instalação e Execução
 
+### Iniciar tudo com um comando
+
+Com as dependências instaladas conforme as instruções abaixo, execute na raiz
+do projeto:
+
+```bash
+npm run iniciar
+```
+
+Esse comando inicia o site em `http://localhost:3000` e a API em
+`http://localhost:8080`. Use **Ctrl+C** para encerrar os dois serviços.
+O script encontra automaticamente o Python com Flask em `backend/.venv`,
+`venv`, `.venv` ou no sistema, sem precisar ativar o ambiente manualmente.
+Se uma das portas estiver ocupada, ele avisa e não inicia outra instância.
+
+### Parar os serviços
+
+Em outro terminal, na raiz do projeto, execute:
+
+```bash
+npm run parar
+```
+
+Solicita o encerramento dos processos nas portas `3000` e `8080` cujo diretório
+de execução seja a raiz deste projeto ou sua pasta `backend`. Funciona também
+para serviços iniciados separadamente. Requer `lsof` (macOS ou Linux).
+Se ainda houver serviços em escuta após a espera, o comando informa seus PIDs
+e retorna erro. Serviços em outras portas não são encerrados.
+
+Para conferir os processos antes de encerrar, use `npm run parar -- --dry-run`.
+
+### Consultar portas e localizar os serviços
+
+```bash
+npm run portas
+```
+
+Lista as portas TCP em escuta, os endereços, os processos e seus PIDs.
+Destaca o frontend em `http://localhost:3000` e o backend em
+`http://localhost:8080`, mostrando os caminhos do código e os diretórios dos
+processos para ajudar a identificar se pertencem a este projeto. Se iniciar
+um serviço em outra porta, consulte a tabela completa. Requer `lsof`
+(já disponível no macOS; no Linux, instale pelo gerenciador de pacotes).
+A consulta não inicia nem encerra serviços.
+
 ### Backend
 
 ```bash

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
+import alertaLogo from "@/public/logo/ALERTA Logo.png";
 import { usePathname } from "next/navigation";
 import { useUnit } from "@/lib/unit-context";
 import {
@@ -43,10 +45,20 @@ export function Sidebar() {
 
       {/* TOPO */}
       <div className="px-5 pt-7 pb-5 border-b border-slate-800">
-        <h1 className="text-white font-black text-2xl tracking-widest uppercase">
-          ALERTA
-        </h1>
-        <p className="text-slate-500 text-[10px] mt-1 uppercase tracking-[0.2em] truncate">
+        <Link
+          href="/"
+          aria-label="ALERTA — Painel Geral"
+          className="block rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+        >
+          <Image
+            src={alertaLogo}
+            alt="ALERTA"
+            priority
+            sizes="184px"
+            className="h-auto w-full"
+          />
+        </Link>
+        <p className="text-slate-500 text-[10px] mt-3 uppercase tracking-[0.2em] truncate">
           {unitName || "Adicione o nome do hospital"}
         </p>
       </div>

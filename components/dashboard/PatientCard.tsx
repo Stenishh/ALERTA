@@ -86,7 +86,7 @@ export function PatientCard({ patient }: PatientCardProps) {
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <div className={`w-2 h-2 rounded-full ${status.dot}`} />
-          <span className="text-[11px] font-medium" style={{ color: "var(--text-muted)" }}>
+          <span className="text-xs font-medium" style={{ color: "var(--text-muted)" }}>
             ID: {patient.deviceId}
           </span>
         </div>
@@ -109,7 +109,7 @@ export function PatientCard({ patient }: PatientCardProps) {
           </span>
           <div className="flex items-center gap-1.5 mt-1">
             <div className={`w-1.5 h-1.5 rounded-full ${risk.dot}`} />
-            <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>{risk.label}</span>
+            <span className="text-xs" style={{ color: "var(--text-muted)" }}>{risk.label}</span>
           </div>
         </div>
       </div>
@@ -127,7 +127,7 @@ export function PatientCard({ patient }: PatientCardProps) {
         </div>
         <Link
           href={`/patients/${patient.id}`}
-          className="text-slate-300 hover:text-slate-600 transition-colors"
+          className="patient-details-link text-slate-500 hover:text-slate-700 transition-colors"
         >
           <ChevronRight size={16} />
         </Link>

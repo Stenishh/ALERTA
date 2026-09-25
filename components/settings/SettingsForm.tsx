@@ -9,8 +9,8 @@ interface SettingsFormProps {
 }
 
 export function SettingsForm({ onUnitNameChange }: SettingsFormProps) {
-  const { darkMode, setDarkMode } = useUnit();
-  const [unitName, setUnitName] = useState("");
+  const { unitName: currentUnitName, darkMode, setDarkMode } = useUnit();
+  const [unitName, setUnitName] = useState(currentUnitName);
   const [criticalAlerts, setCriticalAlerts] = useState(true);
   const [volume, setVolume] = useState(50);
   const [saved, setSaved] = useState(false);

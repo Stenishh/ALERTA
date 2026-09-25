@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, Save } from "lucide-react";
+import { X, Save, Plus, Trash2 } from "lucide-react";
 import type { MedicalRecord, RiskLevel, Patient } from "@/types";
 
 interface MedicalRecordModalProps {
@@ -27,7 +27,11 @@ export function MedicalRecordModal({
     existingRecord?.riskLevel ?? "low"
   );
   const [responsible, setResponsible] = useState(existingRecord?.responsible ?? "");
-  const [observations, setObservations] = useState(existingRecord?.observations ?? "");
+  const [observations, setObservations] = useState<string[]>(
+    existingRecord?.observations?.trim()
+      ? existingRecord.observations.split(/\n\s*\n/)
+      : [""]
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +39,11 @@ export function MedicalRecordModal({
     setIsSaving(true);
     setError(null);
     try {
-      await onSave({ riskLevel, responsible, observations });
+      await onSave({
+        riskLevel,
+        responsible,
+        observations: observations.map((observation) => observation.trim()).filter(Boolean).join("\n\n"),
+      });
       onClose();
     } catch (requestError) {
       setError(
@@ -61,7 +69,7 @@ export function MedicalRecordModal({
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <div
           style={{ backgroundColor: "var(--bg-card)", borderColor: "var(--border)" }}
-          className="rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border"
+          className="rounded-2xl shadow-2xl w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto border"
         >
           {/* Cabeçalho */}
           <div
@@ -145,22 +153,45 @@ export function MedicalRecordModal({
             </div>
 
             {/* Observações clínicas */}
-            <div className="flex flex-col gap-1.5">
-              <label style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
+            <div className="flex flex-col gap-3">
+              <span style={{ color: "var(--text-secondary)" }} className="text-xs font-medium">
                 Observações Clínicas
-              </label>
-              <textarea
-                value={observations}
-                onChange={(e) => setObservations(e.target.value)}
-                placeholder="Descreva sinais vitais, histórico recente ou recomendações específicas..."
-                rows={4}
-                style={{
-                  backgroundColor: "var(--bg-card-inner)",
-                  borderColor: "var(--border)",
-                  color: "var(--text-primary)",
-                }}
-                className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none transition-colors resize-none placeholder:text-slate-500"
-              />
+              </span>
+              {observations.map((observation, index) => (
+                <div key={index} className="flex items-start gap-2">
+                  <textarea
+                    aria-label={`Observação clínica ${index + 1}`}
+                    value={observation}
+                    onChange={(e) => setObservations((current) => current.map((item, itemIndex) => itemIndex === index ? e.target.value : item))}
+                    placeholder="Descreva uma observação clínica..."
+                    rows={3}
+                    style={{
+                      backgroundColor: "var(--bg-card-inner)",
+                      borderColor: "var(--border)",
+                      color: "var(--text-primary)",
+                    }}
+                    className="w-full px-3 py-2.5 rounded-xl border text-sm outline-none transition-colors resize-y placeholder:text-slate-500"
+                  />
+                  {observations.length > 1 && (
+                    <button
+                      type="button"
+                      aria-label={`Remover observação clínica ${index + 1}`}
+                      onClick={() => setObservations((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                      className="p-2 rounded-lg hover:bg-red-50 text-red-600"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={() => setObservations((current) => [...current, ""])}
+                style={{ color: "var(--accent)" }}
+                className="flex items-center gap-2 self-start text-sm font-semibold"
+              >
+                <Plus size={16} /> Adicionar observação
+              </button>
             </div>
 
           </div>

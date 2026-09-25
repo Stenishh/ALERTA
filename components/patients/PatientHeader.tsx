@@ -173,7 +173,7 @@ export function PatientHeader({ patient, onEditMedicalRecord, onUnlink, onDelete
             <DeviceControls patient={patient} onReset={onReset} onCalibrate={onCalibrate} />
             <button
               onClick={onEditMedicalRecord}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium transition-all"
+              className="edit-record-button flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 text-sm font-medium transition-all"
             >
               <Pencil size={14} />
               Editar Ficha

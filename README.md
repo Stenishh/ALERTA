@@ -159,50 +159,46 @@ ESP32.
 
 ### Uso como colete ou cinto
 
-O mesmo firmware usa a direção da gravidade na calibração como referência,
-permitindo fixar o sensor em orientações diferentes no colete ou no cinto.
-Prenda o dispositivo firmemente e mantenha a pessoa em pé e parada durante a
-calibração ao iniciar. Ao mudar a posição de montagem, reinicie o dispositivo
-nessa postura para calibrar novamente.
+Prenda o dispositivo firmemente no colete ou cinto, com X para cima, Y para a
+esquerda e Z para a frente quando a pessoa está em pé. Ao iniciar, o firmware
+calibra o sensor por 10 segundos; a pessoa pode se mover nesse período. A
+referência de postura continua definida pela montagem.
 
-Na ficha do paciente, **Calibrar sensor** permite solicitar uma nova calibração
-sem reiniciar. Confirme as instruções no pop-up com a pessoa já em pé e parada.
+Na ficha do paciente, **Calibrar sensor** permite solicitar nova calibração sem
+reiniciar. A pessoa pode se mover; breves momentos estáveis ajudam a precisão.
 O dispositivo precisa estar online e com o firmware atualizado para receber o
 comando. O pop-up aguarda o início confirmado pela placa, mostra uma contagem
-estimada de 3 segundos e só exibe sucesso após receber o resultado do ESP32.
+estimada de 10 segundos e só exibe sucesso após receber o resultado do ESP32.
 Falhas são informadas; sem confirmação em 30 segundos, a espera expira.
 **Reiniciar dispositivo** também abre uma confirmação antes de enviar o comando.
 
-O firmware **2.7** usa a magnitude dos três eixos, sem depender de qual face
-está voltada para cima. Há duas formas de confirmar uma queda dentro de 4 s:
+O firmware **3.3** usa a detecção da versão 3.1. Impacto acima de 13 m/s² ou
+aceleração abaixo de 3,5 m/s² inicia uma janela de 4 segundos. Dentro dela,
+uma mudança de postura maior que 35° em relação ao eixo X confirma a queda
+após estabilização. Queda livre contínua por pelo menos 100 ms, seguida de
+impacto, também pode confirmar sem exigir postura final inclinada.
 
-- Impacto acima de 13 m/s² ou queda livre sustentada abaixo de 3,5 m/s² por
-  pelo menos 100 ms, seguidos de inclinação maior que 60° da referência.
-- Queda livre sustentada **antes** do impacto, seguida de estabilização em
-  qualquer posição, inclusive sentada ou vertical. Se o evento começar com
-  impacto, essa segunda via fica desativada para reduzir alertas de saltos.
-
-As duas vias exigem 1,2 s de confirmação, aceleração próxima de 1 g (tolerância
+A confirmação exige 1,2 s nessa posição, aceleração próxima de 1 g (tolerância
 2 m/s²) e rotação de até 90°/s. Lacunas acima de 250 ms reiniciam a confirmação;
 acima de 75 ms interrompem a contagem contínua de queda livre. Durante a análise,
 o envio HTTP e a reconexão Wi-Fi são adiados para preservar as leituras.
 O alerta confirmado permanece ativo até o atendimento no painel.
 
-A velocidade estimada também participa da decisão: a queda livre usa o tempo
-abaixo de 3,5 m/s² e o impacto acumula o impulso acelerométrico. Assim, uma
-inclinação lenta ou um toque isolado não basta para confirmar uma queda.
+Um giro isolado e uma inclinação sem impacto ou queda livre não iniciam o alerta.
 
-A calibração rejeita leituras inválidas e movimentos, calcula os offsets do
-giroscópio e normaliza o módulo da gravidade. A referência de postura **não é**
-um offset do acelerômetro: subtraí-la eliminaria a gravidade indevidamente.
+A calibração usa os trechos mais estáveis dos 10 segundos para corrigir o ganho
+do acelerômetro e, quando houver amostras suficientes, o desvio do giroscópio.
+Se houver movimento durante toda a coleta, mantém as correções anteriores sem
+bloquear o sensor; leituras inválidas ou perda de comunicação causam falha.
+A referência de postura continua sendo X
+para cima; sem uma postura conhecida, a calibração não pode inferir essa direção.
 Os parâmetros `ACC_OFFSET_X/Y/Z` aceitam bias em m/s² medido por calibração em
 seis faces; o padrão é zero, porque uma única postura não permite determinar
 os três offsets independentemente. Essas correções são aplicadas antes dos
 limiares e do cálculo de postura. Deitado e imóvel passa a ser `PARADO`.
 
-Os testes sintéticos cobrem diferentes montagens, quedas à frente, atrás,
-laterais, inversão, posição final vertical, offsets, giros, impulsos de salto,
-lacunas e leituras inválidas. Execute `python3 -B -m unittest discover -s tests -v`
+Os testes sintéticos cobrem impacto, queda livre, postura final, giros, lacunas
+e leituras inválidas. Execute `python3 -B -m unittest discover -s tests -v`
 (requer `clang++`). Os limiares ainda precisam de validação física com o sensor
 fixado: quedas lentas, pouca queda livre e saltos com impulso não amostrado
 podem causar perdas ou falsos alertas. O HTTP continua síncrono fora da análise,

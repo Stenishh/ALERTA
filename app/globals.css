@@ -13,15 +13,71 @@
 }
 
 [data-theme="dark"] {
-  --bg-body: #020617;
-  --bg-sidebar: #020617;
-  --bg-card: #0F172A;
-  --bg-card-inner: #0a1020;
-  --text-primary: #F8FAFC;
-  --text-secondary: #94a3b8;
-  --text-muted: #475569;
-  --border: rgba(45, 212, 191, 0.1);
-  --accent: #2DD4BF;
+  --bg-body: #0b1424;
+  --bg-sidebar: #0b1424;
+  --bg-card: #172438;
+  --bg-card-inner: #203149;
+  --text-primary: #f8fafc;
+  --text-secondary: #d7e2ef;
+  --text-muted: #b4c4d8;
+  --border: #3c5069;
+  --accent: #5eead4;
+}
+
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: #b4c4d8;
+  opacity: 1;
+}
+
+[data-theme="dark"] .clinical-status.bg-emerald-50,
+[data-theme="dark"] .risk-panel.bg-emerald-50 {
+  background-color: #123d37;
+  border-color: #29816c;
+  color: #a7f3d0;
+}
+
+[data-theme="dark"] .clinical-status.bg-amber-50,
+[data-theme="dark"] .risk-panel.bg-amber-50 {
+  background-color: #433319;
+  border-color: #947337;
+  color: #fde68a;
+}
+
+[data-theme="dark"] .clinical-status.bg-red-50,
+[data-theme="dark"] .risk-panel.bg-red-50 {
+  background-color: #46242d;
+  border-color: #ac5362;
+  color: #fecaca;
+}
+
+[data-theme="dark"] .clinical-status.bg-slate-50 {
+  background-color: #26354a;
+  border-color: #52677f;
+  color: #d7e2ef;
+}
+
+[data-theme="dark"] .clinical-status .status-label,
+[data-theme="dark"] .risk-panel .risk-label {
+  color: inherit;
+}
+
+[data-theme="dark"] .edit-record-button {
+  background-color: var(--bg-card-inner);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .edit-record-button:hover {
+  background-color: #2b405c;
+}
+
+[data-theme="dark"] .patient-details-link {
+  color: var(--text-secondary);
+}
+
+[data-theme="dark"] .patient-details-link:hover {
+  color: var(--accent);
 }
 
 body {

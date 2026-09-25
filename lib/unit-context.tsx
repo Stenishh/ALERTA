@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useSyncExternalStore } from "react";
 
 interface UnitContextType {
   unitName: string;
@@ -9,26 +9,57 @@ interface UnitContextType {
   setDarkMode: (value: boolean) => void;
 }
 
+const DEFAULT_UNIT_NAME = "Fetin";
+const THEME_STORAGE_KEY = "alerta-theme";
+const THEME_CHANGE_EVENT = "alerta-theme-change";
+
+function isDarkTheme() {
+  return document.documentElement.getAttribute("data-theme") === "dark";
+}
+
+function subscribeToTheme(onChange: () => void) {
+  function onStorage(event: StorageEvent) {
+    if (event.key !== THEME_STORAGE_KEY) return;
+    if (event.newValue === "dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
+    } else {
+      document.documentElement.removeAttribute("data-theme");
+    }
+    onChange();
+  }
+
+  window.addEventListener(THEME_CHANGE_EVENT, onChange);
+  window.addEventListener("storage", onStorage);
+  return () => {
+    window.removeEventListener(THEME_CHANGE_EVENT, onChange);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
 const UnitContext = createContext<UnitContextType>({
-  unitName: "",
+  unitName: DEFAULT_UNIT_NAME,
   setUnitName: () => {},
   darkMode: false,
   setDarkMode: () => {},
 });
 
 export function UnitProvider({ children }: { children: React.ReactNode }) {
-  const [unitName, setUnitName] = useState("");
-  const [darkMode, setDarkMode] = useState(false);
+  const [unitName, setUnitName] = useState(DEFAULT_UNIT_NAME);
+  const darkMode = useSyncExternalStore(subscribeToTheme, isDarkTheme, () => false);
 
-  // Aplica o tema no <html> quando darkMode muda
-  useEffect(() => {
-    const root = document.documentElement;
-    if (darkMode) {
-      root.setAttribute("data-theme", "dark");
+  function setDarkMode(value: boolean) {
+    if (value) {
+      document.documentElement.setAttribute("data-theme", "dark");
     } else {
-      root.removeAttribute("data-theme");
+      document.documentElement.removeAttribute("data-theme");
     }
-  }, [darkMode]);
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, value ? "dark" : "light");
+    } catch {
+      // A escolha permanece ativa na página atual.
+    }
+    window.dispatchEvent(new Event(THEME_CHANGE_EVENT));
+  }
 
   return (
     <UnitContext.Provider value={{ unitName, setUnitName, darkMode, setDarkMode }}>

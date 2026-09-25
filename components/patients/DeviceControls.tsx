@@ -25,7 +25,7 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
   const inProgress = phase === "pending" || phase === "running";
   const remaining = current?.startedAt
     ? Math.min(Math.ceil(current.durationMs / 1000), Math.max(0, Math.ceil((current.durationMs - (now - Date.parse(current.startedAt))) / 1000)))
-    : Math.ceil((current?.durationMs ?? 3000) / 1000);
+    : Math.ceil((current?.durationMs ?? 10000) / 1000);
   const tracking = action === "calibrate" && current !== null;
   const offline = patient.status === "offline";
 
@@ -58,7 +58,7 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
         setJob(scheduled);
       } else {
         await onReset();
-        setMessage("Reinício agendado. Aguarde a reconexão e permaneça em pé e parado durante a calibração.");
+        setMessage("Reinício agendado. Aguarde a reconexão do dispositivo.");
         setAction(null);
       }
     } catch (requestError) {
@@ -97,19 +97,19 @@ export function DeviceControls({ patient, onReset, onCalibrate }: DeviceControls
         <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{patient.name} · {patient.deviceId}</p>
         <div id="device-command-description" className="mt-4 space-y-3 text-sm" style={{ color: "var(--text-secondary)" }}>
           <p>{action === "reset"
-            ? "O monitoramento será interrompido enquanto o dispositivo reinicia e se reconecta. Ao iniciar, ele fará uma nova calibração."
-            : "A calibração ajusta a referência de postura para a posição atual do sensor e pausa brevemente a detecção."}</p>
-          <p>Prenda o sensor no colete ou cinto. A pessoa deve estar em pé e permanecer parada durante a calibração.</p>
+            ? "O monitoramento será interrompido enquanto o dispositivo reinicia e se reconecta. Ao iniciar, ele calibrará o sensor por 10 segundos."
+            : "O dispositivo coleta leituras por 10 segundos para calibrar o sensor. A detecção fica pausada nesse período."}</p>
+          <p>Prenda o sensor no colete ou cinto na orientação definida. A pessoa pode se mover; breves momentos estáveis ajudam a precisão.</p>
         </div>
         {tracking && (
           <div role="status" aria-live="polite" className="mt-5 rounded-xl p-4 text-center" style={{ backgroundColor: "var(--bg-card-inner)" }}>
             {phase === "pending" && <><p>Aguardando o dispositivo iniciar…</p><p className="mt-2 text-sm">Tempo estimado de calibração: {remaining} segundos.</p></>}
             {phase === "running" && <>
               <p className="text-4xl font-bold tabular-nums">{remaining > 0 ? `${remaining}s` : "Aguarde…"}</p>
-              <p className="mt-2 text-sm">{remaining > 0 ? "Calibrando. Permaneça em pé e parado." : "Aguardando a confirmação do dispositivo."}</p>
+              <p className="mt-2 text-sm">{remaining > 0 ? "Calibrando o sensor." : "Aguardando a confirmação do dispositivo."}</p>
             </>}
-            {phase === "completed" && <p className="font-semibold text-emerald-600">Calibração feita com sucesso. O sensor confirmou a nova referência.</p>}
-            {phase === "failed" && <p className="text-red-500">Não foi possível concluir a calibração. Confira o sensor e tente novamente.</p>}
+            {phase === "completed" && <p className="font-semibold text-emerald-600">Calibração concluída com sucesso.</p>}
+            {phase === "failed" && <p className="text-red-500">Não foi possível calibrar. Confira o sensor e tente novamente.</p>}
             {phase === "timeout" && <p className="text-amber-600">O dispositivo não confirmou a calibração no prazo. Confira a conexão e se a placa está com o firmware atualizado.</p>}
           </div>
         )}

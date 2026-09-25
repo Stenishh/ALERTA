@@ -74,10 +74,10 @@ export function MedicalRecordCard({ record, onAdd }: MedicalRecordCardProps) {
             const risk = riskConfig[record.riskLevel];
             return (
               <div
-                className={`flex items-center gap-2 px-3 py-2 rounded-xl border ${risk.bg} ${risk.border}`}
+                className={`risk-panel flex items-center gap-2 px-3 py-2 rounded-xl border ${risk.bg} ${risk.border}`}
               >
                 <div className={`w-2.5 h-2.5 rounded-full ${risk.dot}`} />
-                <span className={`text-sm font-bold ${risk.text}`}>
+                <span className={`risk-label text-sm font-bold ${risk.text}`}>
                   {risk.label}
                 </span>
               </div>
@@ -87,7 +87,7 @@ export function MedicalRecordCard({ record, onAdd }: MedicalRecordCardProps) {
           {/* Responsável técnico */}
           {record.responsible && (
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+              <span className="text-xs uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                 Responsável Técnico
               </span>
               <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
@@ -99,19 +99,24 @@ export function MedicalRecordCard({ record, onAdd }: MedicalRecordCardProps) {
           {/* Observações clínicas */}
           {record.observations && (
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+              <span className="text-xs uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
                 Observações Clínicas
               </span>
-              <p
-                className="text-sm leading-relaxed rounded-xl p-3 border"
-                style={{
-                  color: "var(--text-secondary)",
-                  backgroundColor: "var(--bg-card-inner)",
-                  borderColor: "var(--border)",
-                }}
-              >
-                {record.observations}
-              </p>
+              <div className="flex flex-col gap-2">
+                {record.observations.split(/\n\s*\n/).filter(Boolean).map((observation, index) => (
+                  <p
+                    key={index}
+                    className="text-sm leading-relaxed whitespace-pre-wrap break-words rounded-xl p-3 border"
+                    style={{
+                      color: "var(--text-secondary)",
+                      backgroundColor: "var(--bg-card-inner)",
+                      borderColor: "var(--border)",
+                    }}
+                  >
+                    {observation}
+                  </p>
+                ))}
+              </div>
             </div>
           )}
 

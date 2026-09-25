@@ -133,7 +133,7 @@ export default function DashboardPage() {
         </div>
       ) : filteredPatients.length === 0 ? (
         <div className="flex-1 flex flex-col gap-3 items-center justify-center">
-          <p className="text-slate-400 text-sm">
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
             {search
               ? `Nenhum paciente encontrado para "${search}"`
               : "Nenhum dispositivo enviou dados ou foi vinculado ainda."}

@@ -42,47 +42,52 @@ export function FallAlertModal({ alert, onAcknowledge }: FallAlertModalProps) {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/60 z-40 animate-pulse" />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+      <div className="fixed inset-0 bg-slate-950/75 z-40" />
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="fall-alert-title"
+          className="bg-white rounded-3xl shadow-2xl ring-4 ring-red-500/40 w-full max-w-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
+        >
 
           {/* Cabeçalho vermelho */}
-          <div className="bg-red-600 px-6 py-4 flex items-center gap-3">
-            <AlertTriangle size={24} className="text-white flex-shrink-0" />
+          <div className="bg-red-600 px-6 py-6 sm:px-10 sm:py-8 flex items-center gap-5">
+            <AlertTriangle size={48} strokeWidth={2.5} className="text-white flex-shrink-0" />
             <div>
-              <p className="text-white font-bold text-lg leading-tight">QUEDA DETECTADA</p>
-              <p className="text-red-200 text-xs">Alerta imediato — Resposta necessária</p>
+              <p id="fall-alert-title" className="text-white font-extrabold text-2xl sm:text-4xl leading-tight">QUEDA DETECTADA</p>
+              <p className="text-white/90 text-base sm:text-lg font-medium mt-1">Alerta imediato — Resposta necessária</p>
             </div>
           </div>
 
           {/* Corpo */}
-          <div className="px-6 py-5 flex flex-col gap-4 bg-white">
+          <div className="px-6 py-6 sm:px-10 sm:py-8 flex flex-col gap-6 bg-white">
 
             {/* Dados do paciente */}
-            <div className="flex items-center gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
-              <div className="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
-                <span className="text-slate-600 text-sm font-semibold">
+            <div className="flex items-center gap-5 bg-red-50 rounded-2xl p-5 border-2 border-red-200">
+              <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center flex-shrink-0">
+                <span className="text-red-700 text-xl font-bold">
                   {alert.patientName.split(" ").slice(0, 2).map((n) => n[0]).join("")}
                 </span>
               </div>
-              <div>
-                <p className="text-slate-800 font-semibold text-sm">{alert.patientName}</p>
-                <p className="text-slate-400 text-xs">{alert.location}</p>
-                <p className="text-slate-400 text-xs mt-0.5">Detectado às {time}</p>
+              <div className="min-w-0">
+                <p className="text-slate-900 font-bold text-xl sm:text-2xl break-words">{alert.patientName}</p>
+                <p className="text-slate-700 text-base sm:text-lg">{alert.location}</p>
+                <p className="text-slate-600 text-sm sm:text-base mt-1">Detectado às {time}</p>
               </div>
             </div>
 
             <button
               onClick={() => void handleAction(onAcknowledge)}
               disabled={isResolving}
-              className="w-full bg-red-600 hover:bg-red-700 active:scale-95 disabled:cursor-wait disabled:opacity-70 transition-all text-white font-bold text-sm py-3 rounded-xl"
+              className="w-full bg-red-600 hover:bg-red-700 active:scale-95 disabled:cursor-wait disabled:opacity-70 transition-all text-white font-bold text-lg sm:text-xl py-5 rounded-xl"
             >
               {isResolving ? "CONFIRMANDO..." : "OK — ENCERRAR ALERTA"}
             </button>
 
-            {error && <p className="text-center text-red-500 text-xs">{error}</p>}
+            {error && <p className="text-center text-red-700 text-base">{error}</p>}
 
-            <p className="text-center text-slate-400 text-xs">
+            <p className="text-center text-slate-600 text-sm sm:text-base">
               Ao confirmar, a atividade do dispositivo voltará ao estado normal
             </p>
           </div>

@@ -1,6 +1,8 @@
 import os
 import tempfile
 import unittest
+from datetime import timedelta
+from unittest.mock import patch
 
 
 test_data = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
@@ -55,6 +57,42 @@ class AlertApiTest(unittest.TestCase):
         self.assertEqual(current["status"], "moving")
         self.assertEqual(current["battery"], 73)
         self.assertEqual(current["wifiSignal"], -64)
+
+    def test_activity_time_survives_status_changes_and_reload(self):
+        patient = self.register_device()
+        url = f"/api/patients/{patient['id']}"
+        base = backend.utc_now()
+
+        def send_at(seconds, status):
+            with patch.object(backend, "utc_now", return_value=base + timedelta(seconds=seconds)):
+                response = self.client.post(
+                    "/api/sensor", json={"deviceId": patient["deviceId"], "status": status}
+                )
+                self.assertEqual(response.status_code, 200)
+                return self.client.get(url).get_json()["activityDurationSeconds"]
+
+        self.assertEqual(send_at(0, "EM MOVIMENTO"), 0)
+        self.assertEqual(send_at(65, "PARADO"), 65)
+        self.assertEqual(send_at(130, "EM MOVIMENTO"), 130)
+        backend.state = backend.load_state()
+        self.assertEqual(send_at(195, "PARADO"), 195)
+
+    def test_existing_activity_time_is_kept_during_migration(self):
+        patient = self.register_device()
+        self.client.post(
+            "/api/sensor", json={"deviceId": patient["deviceId"], "status": "PARADO"}
+        )
+        device = backend.get_device_by_patient_id(patient["id"])
+        device.pop("activityStartedAt")
+        previous_start = device["statusSince"]
+        backend.save_state()
+        backend.state = backend.load_state()
+        migrated = backend.get_device_by_patient_id(patient["id"])
+        self.assertEqual(migrated["activityStartedAt"], previous_start)
+        self.client.post(
+            "/api/sensor", json={"deviceId": patient["deviceId"], "status": "EM MOVIMENTO"}
+        )
+        self.assertEqual(migrated["activityStartedAt"], previous_start)
 
     def test_fall_creates_one_pending_alert(self):
         self.register_device()
@@ -125,6 +163,7 @@ class AlertApiTest(unittest.TestCase):
         url = f"/api/devices/{patient['id']}/calibrate"
         job = self.client.post(url).get_json()
         self.assertEqual(job["status"], "pending")
+        self.assertEqual(job["durationMs"], 10000)
         self.assertEqual(self.client.post(url).status_code, 409)
         reply = self.client.post("/api/sensor", json=payload).get_json()
         self.assertEqual(reply["calibrationId"], job["id"])

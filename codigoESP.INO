@@ -13,7 +13,7 @@
  * - Alertas em tempo real
  * * Autor: Fernando Stein
  * Data: Janeiro 2026
- * Versão do firmware: 2.7
+ * Versão do firmware: 3.3
  */
 
 // ==========================================
@@ -28,7 +28,7 @@
 #include <esp_system.h>
 #include "time.h"
 
-const char* FIRMWARE_VERSION = "2.7";
+const char* FIRMWARE_VERSION = "3.3";
 
 // ==========================================
 // CONFIGURAÇÕES - EDITE AQUI!
@@ -67,7 +67,7 @@ const float IMPACT_THRESHOLD = 13.0;            // m/s² - pico de impacto em qu
 const float FREEFALL_THRESHOLD = 3.5;           // m/s² - queda livre antes do impacto
 const float POSTURE_MAX_ROTATION = 90.0;        // °/s - tolera giro residual apos a queda
 const float POSTURE_GRAVITY_TOLERANCE = 2.0;    // m/s² - rejeitar aceleracao dinamica
-// Angulo relativo a postura em pe calibrada: independe do eixo da montagem.
+// Angulo relativo a postura em pe definida pela montagem (X para cima).
 // Quedas laterais podem terminar semi-inclinadas por causa do cinto/colete.
 const float LYING_ANGLE_DEGREES = 35.0;
 const unsigned long IMPACT_WINDOW = 4000;       // prazo total apos impacto
@@ -85,6 +85,7 @@ const float MIN_FALL_SPEED_MPS = 0.0f;
 const float MIN_FREEFALL_SPEED_MPS = 0.80f;
 
 const unsigned long SENSOR_INTERVAL = 25;
+const unsigned long CALIBRATION_DURATION_MS = 10000;
 const unsigned long TELEMETRY_INTERVAL = 1000;
 const unsigned long WIFI_RECONNECT_INTERVAL = 30000;
 
@@ -290,67 +291,58 @@ bool initSensor() {
 }
 
 bool calibrateSensor() {
-  Serial.println("\n🔧 Calibrando sensor...");
-  Serial.println("⚠️  Fixe o sensor no colete ou cinto. Fique EM PE e PARADO durante a calibracao!");
-  
-  delay(1000);
-  
-  float sumAccX = 0, sumAccY = 0, sumAccZ = 0;
+  Serial.println("\n🔧 Calibrando sensor por 10 segundos...");
+  float sumAccMagnitude = 0;
   float sumGyroX = 0, sumGyroY = 0, sumGyroZ = 0;
-  float sumAccSquared = 0, sumGyroSquared = 0;
-  const int samples = 100; // 1 s de preparo + 100 leituras de 20 ms = cerca de 3 s.
-  
-  for (int i = 0; i < samples; i++) {
+  unsigned int accSamples = 0, gyroSamples = 0;
+  const unsigned long started = millis();
+  while (millis() - started < CALIBRATION_DURATION_MS) {
     sensors_event_t a, g;
     if (!readMotion(a, g)) {
-      Serial.println("[I2C] Leitura incompleta na calibracao; sensor nao liberado.");
+      Serial.println("[CAL] Leitura incompleta; referencias anteriores preservadas.");
       return false;
     }
-    a.acceleration.x -= ACC_OFFSET_X;
-    a.acceleration.y -= ACC_OFFSET_Y;
-    a.acceleration.z -= ACC_OFFSET_Z;
-    const float magnitude = getTotalAcceleration(a.acceleration.x, a.acceleration.y, a.acceleration.z);
-    const float rotation = getTotalAcceleration(g.gyro.x, g.gyro.y, g.gyro.z);
-    if (!isfinite(magnitude) || !isfinite(rotation) ||
-        abs(magnitude - SENSORS_GRAVITY_STANDARD) > 2.0f || rotation > 0.35f) {
-      Serial.println("[CAL] Movimento ou leitura invalida. Repita em pe e parado.");
+    if (!isfinite(a.acceleration.x) || !isfinite(a.acceleration.y) ||
+        !isfinite(a.acceleration.z) || !isfinite(g.gyro.x) ||
+        !isfinite(g.gyro.y) || !isfinite(g.gyro.z)) {
+      Serial.println("[CAL] Leitura invalida; referencias anteriores preservadas.");
       return false;
     }
-    sumAccSquared += magnitude * magnitude;
-    sumGyroSquared += rotation * rotation;
-    
-    sumAccX += a.acceleration.x;
-    sumAccY += a.acceleration.y;
-    sumAccZ += a.acceleration.z;
-    sumGyroX += g.gyro.x;
-    sumGyroY += g.gyro.y;
-    sumGyroZ += g.gyro.z;
-    
+    const float ax = a.acceleration.x - ACC_OFFSET_X;
+    const float ay = a.acceleration.y - ACC_OFFSET_Y;
+    const float az = a.acceleration.z - ACC_OFFSET_Z;
+    const float accMagnitude = sqrt(ax*ax + ay*ay + az*az);
+    const float gyroMagnitude = sqrt(g.gyro.x*g.gyro.x +
+                                     g.gyro.y*g.gyro.y + g.gyro.z*g.gyro.z);
+    // Aproveitar os trechos mais estaveis dos 10 s, mesmo que a pessoa se mova.
+    if (abs(accMagnitude - SENSORS_GRAVITY_STANDARD) <= 2.0f &&
+        gyroMagnitude <= 0.35f) {
+      sumAccMagnitude += accMagnitude;
+      accSamples++;
+      if (gyroMagnitude <= 0.15f) {
+        sumGyroX += g.gyro.x;
+        sumGyroY += g.gyro.y;
+        sumGyroZ += g.gyro.z;
+        gyroSamples++;
+      }
+    }
     delay(20);
-    if (i % 10 == 0) Serial.print(".");
   }
-  
-  const float meanAccSquared = (sumAccX*sumAccX + sumAccY*sumAccY + sumAccZ*sumAccZ) / (samples*samples);
-  const float meanGyroSquared = (sumGyroX*sumGyroX + sumGyroY*sumGyroY + sumGyroZ*sumGyroZ) / (samples*samples);
-  if (sumAccSquared / samples - meanAccSquared > 0.12f ||
-      sumGyroSquared / samples - meanGyroSquared > 0.0025f) {
-    Serial.println("[CAL] Postura instavel. Referencias anteriores preservadas.");
-    return false;
+  if (accSamples < 20) {
+    Serial.println("[CAL] Movimento durante a coleta; ganho anterior preservado.");
+  } else {
+    accScale = SENSORS_GRAVITY_STANDARD / (sumAccMagnitude / accSamples);
   }
-  // Normalizacao escalar conserva a gravidade; nunca subtrair refAcc como bias.
-  accScale = SENSORS_GRAVITY_STANDARD / sqrt(meanAccSquared);
-  refAccX = sumAccX / samples;
-  refAccY = sumAccY / samples;
-  refAccZ = sumAccZ / samples;
-  refAccX *= accScale;
-  refAccY *= accScale;
-  refAccZ *= accScale;
-  refGyroX = sumGyroX / samples;
-  refGyroY = sumGyroY / samples;
-  refGyroZ = sumGyroZ / samples;
-  
-  Serial.println("\n✅ Calibração concluída!");
-  Serial.printf("   Referências: AccX=%.2f AccY=%.2f AccZ=%.2f\n", refAccX, refAccY, refAccZ);
+  if (gyroSamples >= 20) {
+    refGyroX = sumGyroX / gyroSamples;
+    refGyroY = sumGyroY / gyroSamples;
+    refGyroZ = sumGyroZ / gyroSamples;
+  }
+  // Postura nao pode ser inferida sem saber como a pessoa estava durante a coleta.
+  refAccX = SENSORS_GRAVITY_STANDARD;
+  refAccY = refAccZ = 0;
+  Serial.printf("[CAL] Concluida: %u amostras de aceleracao, %u de giroscopio, ganho=%.4f\n",
+                accSamples, gyroSamples, accScale);
   return true;
 }
 

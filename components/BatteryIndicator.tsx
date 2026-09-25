@@ -7,10 +7,14 @@ interface BatteryIndicatorProps {
 }
 
 export function BatteryIndicator({ patient, compact = false }: BatteryIndicatorProps) {
-  const level = patient.battery === null || !Number.isFinite(patient.battery)
+  // Uma tensão fora da faixa de uma célula Li-ion indica leitura do ADC/ligação inválida.
+  const invalidVoltage = patient.batteryVoltage != null
+    && (!Number.isFinite(patient.batteryVoltage)
+      || patient.batteryVoltage < 3.0 || patient.batteryVoltage > 4.3);
+  const level = invalidVoltage || patient.battery === null || !Number.isFinite(patient.battery)
     ? null
     : Math.round(Math.min(100, Math.max(0, patient.battery)));
-  const isCritical = level !== null && patient.battery !== null && patient.battery < 20;
+  const isCritical = level !== null && level < 20;
   const offline = patient.status === "offline";
   const color = offline ? "var(--text-muted)" : isCritical ? "#ef4444" : "#10b981";
 
@@ -42,7 +46,7 @@ export function BatteryIndicator({ patient, compact = false }: BatteryIndicatorP
       )}
       {(level === null || offline || !compact) && (
         <span className="text-[10px]" style={{ color: "var(--text-muted)" }}>
-          {level === null ? "Sem leitura" : offline ? "Última leitura" : "Atualização automática"}
+          {invalidVoltage ? "Leitura da bateria inválida" : level === null ? "Sem leitura" : offline ? "Última leitura" : "Atualização automática"}
         </span>
       )}
       {isCritical && !offline && !compact && (

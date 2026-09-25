@@ -58,7 +58,7 @@ export function Sidebar() {
             className="h-auto w-full"
           />
         </Link>
-        <p className="text-slate-500 text-[10px] mt-3 uppercase tracking-[0.2em] truncate">
+        <p className="text-center text-slate-300 text-[11px] mt-3 uppercase tracking-[0.2em] truncate">
           {unitName || "Adicione o nome do hospital"}
         </p>
       </div>

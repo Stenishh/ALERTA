@@ -43,6 +43,12 @@ def load_state():
             loaded.setdefault("devices", {})
             loaded.setdefault("alerts", [])
             loaded.setdefault("logs", [])
+            for device in loaded["devices"].values():
+                if "activityStartedAt" not in device:
+                    device["activityStartedAt"] = (
+                        (device.get("statusSince") or device.get("lastSeen"))
+                        if device.get("lastSeen") else None
+                    )
             return loaded
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return empty_state()
@@ -131,6 +137,7 @@ def new_device(device_id):
         "status": "offline",
         "lastSeen": None,
         "statusSince": now,
+        "activityStartedAt": None,
         "checkpoint": None,
         "telemetry": {},
         "fallHistory": [],
@@ -165,7 +172,12 @@ def effective_status(device):
 
 def activity_seconds(device):
     try:
-        started = datetime.fromisoformat(device.get("statusSince", ""))
+        # Registros antigos ainda nao tem activityStartedAt; manter o tempo ja
+        # exibido ate a proxima telemetria gravar o inicio permanente.
+        started_at = device.get("activityStartedAt") or (
+            device.get("statusSince") if device.get("lastSeen") else None
+        )
+        started = datetime.fromisoformat(started_at)
         return max(0, int((utc_now() - started).total_seconds()))
     except (TypeError, ValueError):
         return 0
@@ -429,7 +441,7 @@ def schedule_device_calibration(patient_id):
         if previous and previous["status"] in ("pending", "running"):
             return error_response("Já existe uma calibração em andamento.", 409)
         device["calibration"] = {
-            "id": str(uuid4()), "status": "pending", "durationMs": 3000,
+            "id": str(uuid4()), "status": "pending", "durationMs": 10000,
             "requestedAt": iso_now(), "startedAt": None,
         }
         device["calibrationPending"] = True
@@ -543,6 +555,10 @@ def sensor_data():
         device["deviceId"] = device_id.upper()
         if data.get("chipId"):
             device["chipId"] = str(data["chipId"])
+        if not device.get("activityStartedAt"):
+            device["activityStartedAt"] = (
+                device.get("statusSince") if device.get("lastSeen") else iso_now()
+            )
         device["lastSeen"] = iso_now()
         device["rawStatus"] = raw_status
         device["checkpoint"] = data.get("checkpoint")

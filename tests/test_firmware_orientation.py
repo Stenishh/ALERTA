@@ -1,22 +1,26 @@
-"""Testa as funções reais do firmware no host, sem placa conectada."""
+"""Exercita a calibração e a decisão de queda do firmware com amostras sintéticas."""
 import pathlib
 import subprocess
 import tempfile
 import unittest
 
 
-class FirmwareOrientationTest(unittest.TestCase):
-    def test_calibration_preserves_gravity_and_rejects_motion(self):
-        source = (pathlib.Path(__file__).resolve().parents[1] / "codigoESP.INO").read_text()
-        constants = source[source.index("const float IMPACT_THRESHOLD"):source.index("// Sensor\n")]
-        states = source[source.index("// Calibração\n"):source.index("// Contadores")]
-        geometry = source[source.index("float getTotalAcceleration("):source.index("// FUNÇÕES - WIFI")]
-        calibration = source[source.index("bool calibrateSensor()"):source.index("float getTotalAcceleration(")]
-        harness = r'''#include <algorithm>
+SOURCE = (pathlib.Path(__file__).resolve().parents[1] / "codigoESP.INO").read_text()
+CONSTANTS = SOURCE[SOURCE.index("const float IMPACT_THRESHOLD"):SOURCE.index("// Sensor\n")]
+STATES = SOURCE[SOURCE.index("// Calibração\n"):SOURCE.index("// Contadores")]
+GEOMETRY = SOURCE[SOURCE.index("float getTotalAcceleration("):SOURCE.index("// FUNÇÕES - WIFI")]
+CALIBRATION = SOURCE[SOURCE.index("bool calibrateSensor()"):SOURCE.index("float getTotalAcceleration(")]
+DETECTOR = SOURCE[SOURCE.index("String analyzeFallDetection("):SOURCE.index("// SETUP (INICIALIZAÇÃO)")]
+
+PREFIX = r'''
+#include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <cstdio>
+#include <string>
 using std::abs;
 using std::isfinite;
+using String=std::string;
 constexpr float SENSORS_GRAVITY_STANDARD=9.80665f;
 constexpr float DEG_TO_RAD=0.017453292519943295f;
 template<class T> T constrain(T v,T lo,T hi) { return std::max(lo,std::min(hi,v)); }
@@ -27,49 +31,75 @@ struct SerialMock {
   void println(const char*) {}
   template<class... Args> void printf(const char*,Args...) {}
 } Serial;
-void delay(int) {}
+unsigned long clockMs=100;
+unsigned long millis() { return clockMs; }
+void delay(int ms) { clockMs+=ms; }
 int mode=0, reads=0;
-Vector mounting{0,0,1};
+Vector mounting{1,0,0};
 bool readMotion(sensors_event_t& a,sensors_event_t& g);
-''' + constants + states + geometry + r'''
+float getTotalAcceleration(float x,float y,float z);
+'''
+
+
+def run_harness(body):
+    with tempfile.TemporaryDirectory() as directory:
+        cpp = pathlib.Path(directory) / "firmware.cpp"
+        binary = pathlib.Path(directory) / "firmware"
+        cpp.write_text(body)
+        subprocess.run(["clang++", "-std=c++11", str(cpp), "-o", str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)
+
+
+class FirmwareOrientationTest(unittest.TestCase):
+    def test_calibration_accepts_any_posture_or_motion_and_rejects_bad_reads(self):
+        read_motion = r'''
 bool readMotion(sensors_event_t& a,sensors_event_t& g) {
   ++reads;
-  a.acceleration={mounting.x*10.2f+ACC_OFFSET_X,
-                  mounting.y*10.2f+ACC_OFFSET_Y,
-                  mounting.z*10.2f+ACC_OFFSET_Z};
+  a.acceleration={mounting.x*10.2f,mounting.y*10.2f,mounting.z*10.2f};
   g.gyro={0.05f,-0.03f,0.02f};
-  if(mode==1) a.acceleration={0,0,0};
-  if(mode==2) g.gyro.x=1.0f;
-  if(mode==3) a.acceleration.x=NAN;
-  if(mode==4 && reads%2) { a.acceleration.x=1; a.acceleration.y=0; a.acceleration.z=10.2f; }
-  if(mode==5 && reads%2) g.gyro.x=-0.15f;
-  return mode!=6;
-}
-''' + calibration + r'''
-int main() {
-  for (Vector v : {Vector{1,0,0},Vector{-1,0,0},Vector{0,1,0},Vector{0,-1,0},
-                   Vector{0,0,1},Vector{0,0,-1},Vector{0.6f,0,0.8f}}) {
-    mounting=v; mode=0; reads=0;
-    assert(calibrateSensor());
-    assert(abs(getTotalAcceleration(refAccX,refAccY,refAccZ)-SENSORS_GRAVITY_STANDARD)<0.001f);
-    assert(abs(accScale-SENSORS_GRAVITY_STANDARD/10.2f)<0.001f);
-    assert(abs(refGyroX-0.05f)<0.001f && abs(refGyroY+0.03f)<0.001f);
-    assert(!isLyingPosition(v.x*9.81f,v.y*9.81f,v.z*9.81f));
-  }
-  mounting={0,0,1}; mode=0; assert(calibrateSensor());
-  const float saved=refAccZ, savedScale=accScale, savedGyro=refGyroX;
-  for(mode=1;mode<=6;++mode) {
-    reads=0; assert(!calibrateSensor());
-    assert(refAccZ==saved && accScale==savedScale && refGyroX==savedGyro);
-  }
+  if (mode==1) { a.acceleration={0,10.2f,0}; g.gyro={0.25f,0,0}; }
+  if (mode==2 && reads%10) g.gyro.x=1.0f;
+  if (mode==5) g.gyro.x=1.0f;
+  if (mode==3) a.acceleration.x=NAN;
+  return mode!=4;
 }
 '''
-        with tempfile.TemporaryDirectory() as directory:
-            cpp = pathlib.Path(directory) / "calibration.cpp"
-            binary = pathlib.Path(directory) / "calibration"
-            cpp.write_text(harness)
-            subprocess.run(["clang++", "-std=c++11", str(cpp), "-o", str(binary)], check=True)
-            subprocess.run([str(binary)], check=True)
+        main = r'''
+int main() {
+  unsigned long started=clockMs;
+  assert(calibrateSensor());
+  assert(clockMs-started>=10000);
+  assert(abs(refAccX-9.80665f)<0.01f);
+  assert(abs(accScale-9.80665f/10.2f)<0.001f);
+  assert(abs(refGyroX-0.05f)<0.001f);
+  for (Vector posture : {Vector{0,1,0},Vector{0,0,1},Vector{-1,0,0}}) {
+    mounting=posture;
+    assert(calibrateSensor());
+    assert(abs(refAccX-9.80665f)<0.01f);
+  }
+  mounting={1,0,0};
+  for (mode=1;mode<=2;++mode) {
+    reads=0;
+    assert(calibrateSensor());
+    assert(abs(accScale-9.80665f/10.2f)<0.001f);
+  }
+  mode=5; started=clockMs;
+  float savedScale=accScale;
+  assert(calibrateSensor());
+  assert(clockMs-started>=10000 && accScale==savedScale);
+  refAccX=7;
+  for (mode=3;mode<=4;++mode) {
+    assert(!calibrateSensor());
+    assert(refAccX==7);
+  }
+  mode=0; assert(calibrateSensor());
+  assert(!isLyingPosition(9.81f,0,0));
+  assert(isLyingPosition(0,9.81f,0));
+  assert(isLyingPosition(0,0,-9.81f));
+  assert(isLyingPosition(-9.81f,0,0));
+}
+'''
+        run_harness(PREFIX + CONSTANTS + STATES + read_motion + CALIBRATION + GEOMETRY + main)
 
     def test_mounting_orientation_and_fall_confirmation(self):
         source = (pathlib.Path(__file__).resolve().parents[1] / "codigoESP.INO").read_text()

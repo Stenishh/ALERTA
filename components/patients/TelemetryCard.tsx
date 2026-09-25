@@ -125,7 +125,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
         }}
       >
         <div className="flex flex-col items-center gap-1">
-          <span className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
+          <span className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>
             Bateria
           </span>
           <BatteryIndicator patient={patient} />
@@ -134,7 +134,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
         <div className="w-px h-12" style={{ backgroundColor: "var(--border)" }} />
 
         <div className="flex flex-col items-center gap-1">
-          <span className="text-[10px] uppercase tracking-widest mb-1" style={{ color: "var(--text-muted)" }}>
+          <span className="text-xs uppercase tracking-wider mb-1" style={{ color: "var(--text-muted)" }}>
             Sinal Wi-Fi
           </span>
           <WifiStrength signal={patient.wifiSignal} />
@@ -171,14 +171,14 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
 
       {/* Status de atividade */}
       <div
-        className={`rounded-xl p-4 border ${status.bg} ${status.border} flex items-center gap-4`}
+        className={`clinical-status rounded-xl p-4 border ${status.bg} ${status.border} flex items-center gap-4`}
       >
         <span className="text-3xl">{status.icon}</span>
         <div>
-          <p className="text-[10px] uppercase tracking-widest mb-0.5" style={{ color: "var(--text-muted)" }}>
+          <p className="text-xs uppercase tracking-wider mb-0.5" style={{ color: "var(--text-muted)" }}>
             Status de Atividade
           </p>
-          <p className={`text-xl font-black ${status.color}`}>
+          <p className={`status-label text-xl font-black ${status.color}`}>
             {status.label}
           </p>
           <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
@@ -194,7 +194,7 @@ export function TelemetryCard({ patient }: TelemetryCardProps) {
         borderColor: "var(--border)",
       }}
     >
-      <span className="text-[10px] uppercase tracking-widest" style={{ color: "var(--text-muted)" }}>
+      <span className="text-xs uppercase tracking-wider" style={{ color: "var(--text-muted)" }}>
         Histórico de Quedas
       </span>
 
